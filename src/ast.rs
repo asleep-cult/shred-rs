@@ -26,18 +26,14 @@ impl<'a> AstArena<'a> {
         }
     }
 
-    fn next_symbol_id(&self) -> u32 {
-        (self.terminals.len() + self.nonterminals.len()) as u32
-    }
-
     pub fn add_terminal(&mut self, name: &'a str, value: &'a str) -> SymbolId {
-        let id = SymbolId(self.next_symbol_id());
+        let id = SymbolId(self.terminals.len() as u32);
         self.terminals.push(TerminalDef { name, value });
         id
     }
 
     pub fn add_nonterminal(&mut self, name: &'a str, is_entrypoint: bool, productions: ArenaRange) -> SymbolId {
-        let id = SymbolId(self.next_symbol_id());
+        let id = SymbolId(self.terminals.len() as u32);
         self.nonterminals.push(NonterminalDef { name, is_entrypoint, productions });
         id
     }
@@ -52,6 +48,22 @@ impl<'a> AstArena<'a> {
         let id = RuleId(self.rules.len() as u32);
         self.rules.push(rule);
         id
+    }
+
+    pub fn terminal(&self, id: SymbolId) -> &TerminalDef {
+        &self.terminals[id.0 as usize]
+    }
+
+    pub fn nonterminal(&self, id: SymbolId) -> &NonterminalDef {
+        &self.nonterminals[id.0 as usize]
+    }
+
+    pub fn production(&self, id: ProductionId) -> &Production {
+        &self.productions[id.0 as usize]
+    }
+
+    pub fn rule(&self, id: RuleId) -> &RuleKind {
+        &self.rules[id.0 as usize]
     }
 
     pub fn production_range(&self, range: ArenaRange) -> &'a [Production] {
@@ -93,5 +105,6 @@ pub enum RuleKind<'a> {
     Optional(RuleId),
     Alternative { left: RuleId, right: RuleId },
     Group { items: ArenaRange },
+    String(&'a str),
     Name(&'a str),
 }

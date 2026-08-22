@@ -22,3 +22,13 @@ There are a few important questions that need to be answered:
   - The generated parser should maintain a list of terminal symbols
             so the scanner can agree on the id to provide. 
 * How will the type in the scanner stack be represented?
+
+Notes on progress:
+- [X] `ast.py` -> `ast.rs`: Definitions for meta-grammar AST
+- [ ] `automaton.py`: Pushdown automaton for parsing with generated parse table
+- [ ] `frozen.py`: Serializable versions of the symbol/parse table which the automaton uses
+- [ ] `generator.py`: Convert the AST into a high-level representation and generate the parse table
+- [X] `parser.py` -> `parser.rs`: Parser for the meta-grammar
+- [ ] `symbols.py`: High-level representation of the AST
+- [X] `tokens.py` -> `scanner.rs`: Token definitions for the meta-grammar, Rust version
+    has a scanner because the Python implementation used the Typethon scanner. 
