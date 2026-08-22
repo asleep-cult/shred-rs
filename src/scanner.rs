@@ -11,6 +11,7 @@ pub enum TokenKind<'a> {
     Star,
     Plus,
     Question,
+    Equal,
     Arrow,
 
     Identifier(&'a str),
@@ -103,7 +104,7 @@ impl<'a> Scanner<'a> {
                     TokenKind::Arrow
                 }
                 else{
-                    TokenKind::Error
+                    TokenKind::Equal
                 }
             },
             'a'..='z' | 'A'..='Z' | '_' => TokenKind::Identifier(self.scan_identifier(start)),
@@ -112,6 +113,18 @@ impl<'a> Scanner<'a> {
                 None => TokenKind::Error,
             },
             _ => TokenKind::Error
+        }
+    }
+}
+
+
+impl<'a> Iterator for Scanner<'a> {
+    type Item = TokenKind<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next_token() {
+            TokenKind::Eof => None,
+            token => Some(token), 
         }
     }
 }
