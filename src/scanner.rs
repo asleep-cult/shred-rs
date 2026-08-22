@@ -2,7 +2,7 @@
 
 use std::{iter::Peekable, str::CharIndices};
 
-pub enum TokenKind<'a> {
+pub enum TokenKind {
     At,
     Colon,
     VerticalBar,
@@ -14,8 +14,8 @@ pub enum TokenKind<'a> {
     Equal,
     Arrow,
 
-    Identifier(&'a str),
-    String(&'a str),
+    Identifier(String),
+    String(String),
     Eof,
 
     Error,
@@ -54,23 +54,23 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn scan_identifier(&mut self, start: usize) -> &'a str {
+    fn scan_identifier(&mut self, start: usize) -> String {
         while let Some('a'..='z' | 'A'..='Z' | '0'..='9' | '_') = self.peek() {
             self.advance();
         }
-        &self.source[start..self.position()]
+        self.source[start..self.position()].to_string()
     }
 
-    fn scan_string(&mut self, start: usize) -> Option<&'a str> {
+    fn scan_string(&mut self, start: usize) -> Option<String> {
         while let Some((_, character)) = self.advance() {
             if character == '"' {
-                return Some(&self.source[start..self.position()])
+                return Some(self.source[start..self.position()].to_string())
             }
         }
         None
     }
 
-    fn next_token(&mut self) -> TokenKind<'a> {
+    fn next_token(&mut self) -> TokenKind {
         self.skip_whitespace();
 
         let (start, character) = match self.advance() {
@@ -119,7 +119,7 @@ impl<'a> Scanner<'a> {
 
 
 impl<'a> Iterator for Scanner<'a> {
-    type Item = TokenKind<'a>;
+    type Item = TokenKind;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_token() {

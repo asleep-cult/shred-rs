@@ -9,14 +9,14 @@ pub struct ArenaRange {
     pub end: u32,
 }
 
-pub struct AstArena<'a> {
-    terminals: Vec<TerminalDef<'a>>,
-    nonterminals: Vec<NonterminalDef<'a>>,
-    productions: Vec<Production<'a>>,
-    rules: Vec<RuleKind<'a>>,
+pub struct AstArena {
+    terminals: Vec<TerminalDef>,
+    nonterminals: Vec<NonterminalDef>,
+    productions: Vec<Production>,
+    rules: Vec<RuleKind>,
 }
 
-impl<'a> AstArena<'a> {
+impl AstArena {
     pub fn new() -> Self {
         Self {
             terminals: Vec::new(),
@@ -26,25 +26,25 @@ impl<'a> AstArena<'a> {
         }
     }
 
-    pub fn add_terminal(&mut self, name: &'a str, value: &'a str) -> SymbolId {
+    pub fn add_terminal(&mut self, name: String, value: String) -> SymbolId {
         let id = SymbolId(self.terminals.len() as u32);
         self.terminals.push(TerminalDef { name, value });
         id
     }
 
-    pub fn add_nonterminal(&mut self, name: &'a str, is_entrypoint: bool, productions: ArenaRange) -> SymbolId {
+    pub fn add_nonterminal(&mut self, name: String, entrypoint: bool, productions: ArenaRange) -> SymbolId {
         let id = SymbolId(self.terminals.len() as u32);
-        self.nonterminals.push(NonterminalDef { name, is_entrypoint, productions });
+        self.nonterminals.push(NonterminalDef { name, entrypoint, productions });
         id
     }
 
-    pub fn add_production(&mut self, rule: RuleId, action: Option<&'a str>) -> ProductionId {
+    pub fn add_production(&mut self, rule: RuleId, action: Option<String>) -> ProductionId {
         let id = ProductionId(self.productions.len() as u32);
         self.productions.push(Production { rule, action });
         id
     }
 
-    pub fn add_rule(&mut self, rule: RuleKind<'a>) -> RuleId {
+    pub fn add_rule(&mut self, rule: RuleKind) -> RuleId {
         let id = RuleId(self.rules.len() as u32);
         self.rules.push(rule);
         id
@@ -66,11 +66,11 @@ impl<'a> AstArena<'a> {
         &self.rules[id.0 as usize]
     }
 
-    pub fn production_range(&self, range: ArenaRange) -> &'a [Production] {
+    pub fn production_range(&self, range: ArenaRange) -> &[Production] {
         &self.productions[range.start as usize..range.end as usize]
     }
 
-    pub fn rule_range(&self, range: ArenaRange) -> &'a [RuleKind] {
+    pub fn rule_range(&self, range: ArenaRange) -> &[RuleKind] {
         &self.rules[range.start as usize..range.end as usize]
     }
 
@@ -83,28 +83,28 @@ impl<'a> AstArena<'a> {
     }
 }
 
-pub struct TerminalDef<'a> {
-    name: &'a str,
-    value: &'a str,
+pub struct TerminalDef {
+    name: String,
+    value: String,
 }
 
-pub struct NonterminalDef<'a> {
-    name: &'a str,
-    is_entrypoint: bool,
+pub struct NonterminalDef {
+    name: String,
+    entrypoint: bool,
     productions: ArenaRange,
 }
 
-pub struct Production<'a> {
+pub struct Production {
     rule: RuleId,
-    action: Option<&'a str>,
+    action: Option<String>,
 }
 
-pub enum RuleKind<'a> {
+pub enum RuleKind {
     Star(RuleId),
     Plus(RuleId),
     Optional(RuleId),
     Alternative { left: RuleId, right: RuleId },
     Group { items: ArenaRange },
-    String(&'a str),
-    Name(&'a str),
+    String(String),
+    Name(String),
 }
