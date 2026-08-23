@@ -1,16 +1,16 @@
 //! This file defines the AST for the grammar.
 
 #[derive(Clone, Copy)]
-pub struct TerminalId(pub u32);
+pub struct TerminalId(pub u16);
 
 #[derive(Clone, Copy)]
-pub struct NonterminalId(pub u32);
+pub struct NonterminalId(pub u16);
 
 #[derive(Clone, Copy)]
-pub struct RuleId(pub u32);
+pub struct RuleId(pub u16);
 
 #[derive(Clone, Copy)]
-pub struct ProductionId(pub u32);
+pub struct ProductionId(pub u16);
 
 pub struct ArenaRange {
     pub start: usize,
@@ -35,25 +35,25 @@ impl AstArena {
     }
 
     pub fn add_terminal(&mut self, name: String, value: Option<String>) -> TerminalId {
-        let id = TerminalId(self.terminals.len() as u32);
+        let id = TerminalId(self.terminals.len() as u16);
         self.terminals.push(TerminalDef { name, value });
         id
     }
 
     pub fn add_nonterminal(&mut self, name: String, entrypoint: bool, productions: usize) -> NonterminalId {
-        let id = NonterminalId(self.terminals.len() as u32);
+        let id = NonterminalId(self.terminals.len() as u16);
         self.nonterminals.push(NonterminalDef { name, entrypoint, productions });
         id
     }
 
     pub fn add_production(&mut self, rule: RuleId, action: Option<String>) -> ProductionId {
-        let id = ProductionId(self.productions.len() as u32);
+        let id = ProductionId(self.productions.len() as u16);
         self.productions.push(Production { rule, action });
         id
     }
 
     pub fn add_rule(&mut self, rule: RuleKind) -> RuleId {
-        let id = RuleId(self.rules.len() as u32);
+        let id = RuleId(self.rules.len() as u16);
         self.rules.push(rule);
         id
     }

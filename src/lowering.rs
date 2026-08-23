@@ -48,6 +48,14 @@ impl LoweringContext {
         Ok(())
     }
 
+    fn add_implicit_nonterminal(&mut self, prefix: &str) -> SymbolId {
+        let name = format!("{}_{}", prefix, self.implicit_nonterminal_count);
+        self.implicit_nonterminal_count += 1;
+        let id = self.interned_symbols.next_sym_id();
+        self.interned_symbols.add_nonterminal(id, name, false);
+        id
+    }
+
     pub fn initialize_production(
         &mut self,
         rules: &Vec<RuleKind>,
@@ -56,17 +64,12 @@ impl LoweringContext {
     ) -> Result<(), LoweringErrorKind> {
         match &rules[rule.0 as usize] {
             RuleKind::Star(inner) => {
-                let name = format!("star_{}", self.implicit_nonterminal_count);
-                self.add_star_expression(rules, name, *inner, production)?;
-            },
+                self.add_star_rule(rules, "star", *inner, production)?;
+            }
             RuleKind::Plus(inner) => {
                 // plus_x = nonterminal
-                let name = format!("plus_{}", self.implicit_nonterminal_count);
-                self.implicit_nonterminal_count += 1;
-
-                let id = self.interned_symbols.next_sym_id();
+                let id = self.add_implicit_nonterminal("plus");
                 production.rhs.push(id);
-                self.interned_symbols.add_nonterminal(id, name, false);
 
                 // | rule plus_x*
                 let mut plus_production = NonterminalProduction {
@@ -76,18 +79,14 @@ impl LoweringContext {
                     action: Some(String::from("@prepend")),
                 };
                 self.initialize_production(rules, *inner, &mut plus_production)?;
-                
-                let name = format!("star_of_plus_{}", self.implicit_nonterminal_count);
-                self.add_star_expression(rules, name, *inner, &mut plus_production)?;
+                self.add_star_rule(rules, "star_of_plus", *inner, &mut plus_production)?;
 
                 self.interned_symbols.add_production(plus_production);
             }
             RuleKind::Optional(inner) => {
                 // optional_x = nonterminal
-                let name = format!("optional_{}", self.implicit_nonterminal_count);
-                let id = self.interned_symbols.next_sym_id();
+                let id = self.add_implicit_nonterminal("optional");
                 production.rhs.push(id);
-                self.interned_symbols.add_nonterminal(id, name, false);
 
                 // | epsilon
                 let epsilon_production = NonterminalProduction {
@@ -107,13 +106,11 @@ impl LoweringContext {
                 };
                 self.initialize_production(rules, *inner, &mut optional_production)?;
                 self.interned_symbols.add_production(optional_production);
-            },
+            }
             RuleKind::Alternative { left, right } => {
                 // alternative_x = nonterminal
-                let name = format!("alternative_{}", self.implicit_nonterminal_count);
-                let id = self.interned_symbols.next_sym_id();
+                let id = self.add_implicit_nonterminal("alternative");
                 production.rhs.push(id);
-                self.interned_symbols.add_nonterminal(id, name, false);
 
                 // | left
                 let mut left_production = NonterminalProduction {
@@ -134,20 +131,20 @@ impl LoweringContext {
                 };
                 self.initialize_production(rules, *right, &mut right_production)?;
                 self.interned_symbols.add_production(right_production);
-            },
+            }
             RuleKind::Group { items } => {
                 for i in items.start..items.end {
-                    self.initialize_production(rules, RuleId(i as u32), production)?;
+                    self.initialize_production(rules, RuleId(i as u16), production)?;
                 } 
-            },
+            }
             RuleKind::String(content) => {
                 match self.interned_symbols.search_terminal(content) {
-                    Some(Symbol { id, kind: SymbolKind::Terminal { .. } }) => {
+                    Some(Symbol { id, kind: SymbolKind::Terminal { .. }, .. }) => {
                         production.rhs.push(*id);
                     },
                     _ => return Err(LoweringErrorKind::UnknownTerminal(content.clone())),
                 }
-            },
+            }
             RuleKind::Name(content) => {
                 let result = self.interned_symbols.search_nonterminal(content).or_else(
                     || self.interned_symbols.search_terminal(content)
@@ -158,23 +155,21 @@ impl LoweringContext {
                     },
                     _ => return Err(LoweringErrorKind::UnknownName(content.clone()))
                 }
-            },
+            }
         }
         Ok(())
     }
 
-    fn add_star_expression(
+    fn add_star_rule(
         &mut self,
         rules: &Vec<RuleKind>,
-        name: String,
+        prefix: &str,
         rule: RuleId,
         production: &mut NonterminalProduction,
     ) -> Result<(), LoweringErrorKind> {
         // star_x = nonterminal
-        let id = self.interned_symbols.next_sym_id();
+        let id = self.add_implicit_nonterminal(&prefix);
         production.rhs.push(id);
-        self.implicit_nonterminal_count += 1;
-        self.interned_symbols.add_nonterminal(id, name, false);
 
         // | epsilon
         let epsilon_production = NonterminalProduction {

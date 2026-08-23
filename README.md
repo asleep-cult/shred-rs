@@ -26,9 +26,10 @@ There are a few important questions that need to be answered:
 Notes on progress:
 - [X] `ast.py` -> `ast.rs`: Definitions for meta-grammar AST
 - [ ] `automaton.py`: Pushdown automaton for parsing with generated parse table
-- [ ] `frozen.py`: Serializable versions of the symbol/parse table which the automaton uses
+- [X] `frozen.py` (Symbol table) -> `symbols.rs`: Serializable versions of the symbol/parse table which the automaton uses
+- [X] `frozen.py` (Parse table) -> `table.rs`: Parse table structure and implementation
 - [ ] `generator.py`: Convert the AST into a high-level representation and generate the parse table
-- [X] `generator.py` -> `lowering.rs`: Lower AST into a graph of symbols.
+- [X] `generator.py` (AST to Symbol graph) -> `lowering.rs`: Lower AST into a graph of symbols.
 - [X] `parser.py` -> `parser.rs`: Parser for the meta-grammar
 - [X] `symbols.py` -> `symbols.rs`: High-level representation of the AST
 - [X] `tokens.py` -> `scanner.rs`: Token definitions for the meta-grammar, Rust version

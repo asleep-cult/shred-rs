@@ -29,6 +29,13 @@ impl<'a> GrammarParser<'a> {
         }
     }
 
+    pub fn parse_ast(mut self) -> AstArena {
+        while let Some(_) = self.scanner.peek() {
+            self.parse_toplevel_item();
+        }
+        self.arena
+    }
+
     fn parse_toplevel_item(&mut self) -> Result<(), GrammarError> {
         match self.scanner.next() {
             Some(token @ TokenKind::At) => self.parse_nonterminal_def(token),
@@ -36,7 +43,7 @@ impl<'a> GrammarParser<'a> {
                 Err(GrammarError { kind: GrammarErrorKind::MaybeNonterminal, token: Some(token) }) => 
                     self.parse_nonterminal_def(token),
                 result => result,
-            },
+            }
             None => Err(GrammarError { kind: GrammarErrorKind::Eof, token: None }),
         }
     }
@@ -53,7 +60,7 @@ impl<'a> GrammarParser<'a> {
                     Some(TokenKind::String(content)) => {
                         self.arena.add_terminal(name, Some(content));
                         Ok(())
-                    },
+                    }
                     next => Err(GrammarError { kind: GrammarErrorKind::InvalidTerminalDef, token: next }),
                 }
             }
@@ -120,7 +127,7 @@ impl<'a> GrammarParser<'a> {
         let end = self.arena.rule_bound();
 
         let rule = if start + 1 == end {
-            RuleId(start as u32)
+            RuleId(start as u16)
         }
         else {
             self.arena.add_rule(RuleKind::Group { items: ArenaRange { start, end } })
@@ -150,15 +157,15 @@ impl<'a> GrammarParser<'a> {
             Some(TokenKind::Star) => {
                 self.scanner.next();
                 self.arena.add_rule(RuleKind::Star(item))
-            },
+            }
             Some(TokenKind::Plus) => {
                 self.scanner.next();
                 self.arena.add_rule(RuleKind::Plus(item))
-            },
+            }
             Some(TokenKind::Question) => {
                 self.scanner.next();
                 self.arena.add_rule(RuleKind::Optional(item))
-            },
+            }
             _ => item,
         }
     }
