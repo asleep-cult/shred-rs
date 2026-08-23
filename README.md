@@ -1,6 +1,6 @@
 # shred-rs
 Shred means shift-reduce.
-For my project [Typethon](https://github.com/asleep-cult/typethon), I implemented
+For my project [Typethon](https://github.com/asleep-cult/typethon/tree/master/typethon/grammar), I implemented
 a LR(1) parser with a pushdown automaton in pure Python.
 The goal of this project is to port the automaton and parser generator to Rust, with
 PyO3 bindings, allowing the generator and automaton to be called from Python.
