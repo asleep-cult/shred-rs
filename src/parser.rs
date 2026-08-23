@@ -1,9 +1,6 @@
 use std::iter::Peekable;
 
-use crate::ast::{
-    SymbolId, RuleId, ProductionId, ArenaRange, AstArena,
-    TerminalDef, NonterminalDef, Production, RuleKind
-};
+use crate::ast::{SymbolId, RuleId, ProductionId, ArenaRange, AstArena, RuleKind};
 use crate::scanner::{Scanner, TokenKind};
 
 pub enum GrammarErrorKind {
@@ -53,11 +50,17 @@ impl<'a> GrammarParser<'a> {
 
                 self.scanner.next();
                 match self.scanner.next() {
-                    Some(TokenKind::String(content)) => Ok(self.arena.add_terminal(name, content)),
+                    Some(TokenKind::String(content)) => Ok(self.arena.add_terminal(name, Some(content))),
                     next => Err(GrammarError { kind: GrammarErrorKind::InvalidTerminalDef, token: next }),
                 }
             }
-            _ => Err(GrammarError { kind: GrammarErrorKind::MaybeNonterminal, token: Some(token) }),
+            Some(TokenKind::Colon) => Err(GrammarError { kind: GrammarErrorKind::MaybeNonterminal, token: Some(token) }),
+            _ => {
+                let TokenKind::Identifier(name) = token else {
+                    return Err(GrammarError { kind: GrammarErrorKind::InvalidTerminalDef, token: Some(token) });
+                };
+                Ok(self.arena.add_terminal(name, None))
+            }
         }
     }
 

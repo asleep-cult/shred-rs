@@ -1,7 +1,14 @@
 //! This file defines the AST for the grammar.
 
+use crate::symbols::Symbol;
+
+#[derive(Clone, Copy)]
 pub struct SymbolId(pub u32);
+
+#[derive(Clone, Copy)]
 pub struct RuleId(pub u32);
+
+#[derive(Clone, Copy)]
 pub struct ProductionId(pub u32);
 
 pub struct ArenaRange {
@@ -26,7 +33,19 @@ impl AstArena {
         }
     }
 
-    pub fn add_terminal(&mut self, name: String, value: String) -> SymbolId {
+    pub fn iter_terminals(&self) -> impl Iterator<Item = (SymbolId, &TerminalDef)> {
+        self.terminals.iter().enumerate().map(
+            |(idx, sym)| (SymbolId(idx as u32), sym)
+        )
+    }
+
+    pub fn iter_nonterminals(&self) -> impl Iterator<Item = (SymbolId, &NonterminalDef)> {
+        self.nonterminals.iter().enumerate().map(
+            |(idx, sym)| (SymbolId(idx as u32), sym)
+        )
+    }
+
+    pub fn add_terminal(&mut self, name: String, value: Option<String>) -> SymbolId {
         let id = SymbolId(self.terminals.len() as u32);
         self.terminals.push(TerminalDef { name, value });
         id
@@ -84,19 +103,19 @@ impl AstArena {
 }
 
 pub struct TerminalDef {
-    name: String,
-    value: String,
+    pub name: String,
+    pub value: Option<String>,
 }
 
 pub struct NonterminalDef {
-    name: String,
-    entrypoint: bool,
-    productions: ArenaRange,
+    pub name: String,
+    pub entrypoint: bool,
+    pub productions: ArenaRange,
 }
 
 pub struct Production {
-    rule: RuleId,
-    action: Option<String>,
+    pub rule: RuleId,
+    pub action: Option<String>,
 }
 
 pub enum RuleKind {
