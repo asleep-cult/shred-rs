@@ -28,7 +28,8 @@ Notes on progress:
 - [ ] `automaton.py`: Pushdown automaton for parsing with generated parse table
 - [ ] `frozen.py`: Serializable versions of the symbol/parse table which the automaton uses
 - [ ] `generator.py`: Convert the AST into a high-level representation and generate the parse table
+- [X] `generator.py` -> `lowering.rs`: Lower AST into a graph of symbols.
 - [X] `parser.py` -> `parser.rs`: Parser for the meta-grammar
-- [ ] `symbols.py`: High-level representation of the AST
+- [X] `symbols.py` -> `symbols.rs`: High-level representation of the AST
 - [X] `tokens.py` -> `scanner.rs`: Token definitions for the meta-grammar, Rust version
     has a scanner because the Python implementation used the Typethon scanner. 

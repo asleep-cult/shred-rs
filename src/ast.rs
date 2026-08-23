@@ -1,9 +1,10 @@
 //! This file defines the AST for the grammar.
 
-use crate::symbols::Symbol;
+#[derive(Clone, Copy)]
+pub struct TerminalId(pub u32);
 
 #[derive(Clone, Copy)]
-pub struct SymbolId(pub u32);
+pub struct NonterminalId(pub u32);
 
 #[derive(Clone, Copy)]
 pub struct RuleId(pub u32);
@@ -12,15 +13,15 @@ pub struct RuleId(pub u32);
 pub struct ProductionId(pub u32);
 
 pub struct ArenaRange {
-    pub start: u32,
-    pub end: u32,
+    pub start: usize,
+    pub end: usize,
 }
 
 pub struct AstArena {
-    terminals: Vec<TerminalDef>,
-    nonterminals: Vec<NonterminalDef>,
-    productions: Vec<Production>,
-    rules: Vec<RuleKind>,
+    pub(crate) terminals: Vec<TerminalDef>,
+    pub(crate) nonterminals: Vec<NonterminalDef>,
+    pub(crate) productions: Vec<Production>,
+    pub(crate) rules: Vec<RuleKind>,
 }
 
 impl AstArena {
@@ -33,26 +34,14 @@ impl AstArena {
         }
     }
 
-    pub fn iter_terminals(&self) -> impl Iterator<Item = (SymbolId, &TerminalDef)> {
-        self.terminals.iter().enumerate().map(
-            |(idx, sym)| (SymbolId(idx as u32), sym)
-        )
-    }
-
-    pub fn iter_nonterminals(&self) -> impl Iterator<Item = (SymbolId, &NonterminalDef)> {
-        self.nonterminals.iter().enumerate().map(
-            |(idx, sym)| (SymbolId(idx as u32), sym)
-        )
-    }
-
-    pub fn add_terminal(&mut self, name: String, value: Option<String>) -> SymbolId {
-        let id = SymbolId(self.terminals.len() as u32);
+    pub fn add_terminal(&mut self, name: String, value: Option<String>) -> TerminalId {
+        let id = TerminalId(self.terminals.len() as u32);
         self.terminals.push(TerminalDef { name, value });
         id
     }
 
-    pub fn add_nonterminal(&mut self, name: String, entrypoint: bool, productions: ArenaRange) -> SymbolId {
-        let id = SymbolId(self.terminals.len() as u32);
+    pub fn add_nonterminal(&mut self, name: String, entrypoint: bool, productions: usize) -> NonterminalId {
+        let id = NonterminalId(self.terminals.len() as u32);
         self.nonterminals.push(NonterminalDef { name, entrypoint, productions });
         id
     }
@@ -69,36 +58,12 @@ impl AstArena {
         id
     }
 
-    pub fn terminal(&self, id: SymbolId) -> &TerminalDef {
-        &self.terminals[id.0 as usize]
+    pub fn production_bound(&self) -> usize {
+        self.productions.len()
     }
 
-    pub fn nonterminal(&self, id: SymbolId) -> &NonterminalDef {
-        &self.nonterminals[id.0 as usize]
-    }
-
-    pub fn production(&self, id: ProductionId) -> &Production {
-        &self.productions[id.0 as usize]
-    }
-
-    pub fn rule(&self, id: RuleId) -> &RuleKind {
-        &self.rules[id.0 as usize]
-    }
-
-    pub fn production_range(&self, range: ArenaRange) -> &[Production] {
-        &self.productions[range.start as usize..range.end as usize]
-    }
-
-    pub fn rule_range(&self, range: ArenaRange) -> &[RuleKind] {
-        &self.rules[range.start as usize..range.end as usize]
-    }
-
-    pub fn production_bound(&self) -> u32 {
-        self.productions.len() as u32
-    }
-
-    pub fn rule_bound(&self) -> u32 {
-        self.rules.len() as u32
+    pub fn rule_bound(&self) -> usize {
+        self.rules.len()
     }
 }
 
@@ -110,7 +75,7 @@ pub struct TerminalDef {
 pub struct NonterminalDef {
     pub name: String,
     pub entrypoint: bool,
-    pub productions: ArenaRange,
+    pub productions: usize,
 }
 
 pub struct Production {

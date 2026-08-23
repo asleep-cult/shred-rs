@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use crate::ast::{SymbolId, RuleId, ProductionId, ArenaRange, AstArena, RuleKind};
+use crate::ast::{RuleId, ArenaRange, AstArena, RuleKind};
 use crate::scanner::{Scanner, TokenKind};
 
 pub enum GrammarErrorKind {
@@ -29,7 +29,7 @@ impl<'a> GrammarParser<'a> {
         }
     }
 
-    fn parse_toplevel_item(&mut self) -> Result<SymbolId, GrammarError> {
+    fn parse_toplevel_item(&mut self) -> Result<(), GrammarError> {
         match self.scanner.next() {
             Some(token @ TokenKind::At) => self.parse_nonterminal_def(token),
             Some(token) => match self.parse_terminal_def(token) {
@@ -41,7 +41,7 @@ impl<'a> GrammarParser<'a> {
         }
     }
 
-    fn parse_terminal_def(&mut self, token: TokenKind) -> Result<SymbolId, GrammarError> {
+    fn parse_terminal_def(&mut self, token: TokenKind) -> Result<(), GrammarError> {
         match self.scanner.peek() {
             Some(TokenKind::Equal) => {
                 let TokenKind::Identifier(name) = token else {
@@ -50,7 +50,10 @@ impl<'a> GrammarParser<'a> {
 
                 self.scanner.next();
                 match self.scanner.next() {
-                    Some(TokenKind::String(content)) => Ok(self.arena.add_terminal(name, Some(content))),
+                    Some(TokenKind::String(content)) => {
+                        self.arena.add_terminal(name, Some(content));
+                        Ok(())
+                    },
                     next => Err(GrammarError { kind: GrammarErrorKind::InvalidTerminalDef, token: next }),
                 }
             }
@@ -59,12 +62,13 @@ impl<'a> GrammarParser<'a> {
                 let TokenKind::Identifier(name) = token else {
                     return Err(GrammarError { kind: GrammarErrorKind::InvalidTerminalDef, token: Some(token) });
                 };
-                Ok(self.arena.add_terminal(name, None))
+                self.arena.add_terminal(name, None);
+                Ok(())
             }
         }
     }
 
-    fn parse_nonterminal_def(&mut self, token: TokenKind) -> Result<SymbolId, GrammarError> {
+    fn parse_nonterminal_def(&mut self, token: TokenKind) -> Result<(), GrammarError> {
         let (entrypoint, next_token) = match token {
             TokenKind::At => (true, self.scanner.next()),
             _ => (false, Some(token)),
@@ -85,10 +89,11 @@ impl<'a> GrammarParser<'a> {
             self.parse_production()?;
         }
         let end = self.arena.production_bound();
-        Ok(self.arena.add_nonterminal(name, entrypoint, ArenaRange { start, end }))
+        self.arena.add_nonterminal(name, entrypoint, end - start);
+        Ok(())
     }
 
-    fn parse_production(&mut self) -> Result<ProductionId, GrammarError> {
+    fn parse_production(&mut self) -> Result<(), GrammarError> {
         let rule = self.parse_rule_group()?;
         let action = match self.scanner.peek() {
             Some(TokenKind::Identifier(_)) => {
@@ -103,7 +108,8 @@ impl<'a> GrammarParser<'a> {
             _ => None,
         };
 
-        Ok(self.arena.add_production(rule, action))
+        self.arena.add_production(rule, action);
+        Ok(())
     }
 
     fn parse_rule_group(&mut self) -> Result<RuleId, GrammarError> {
