@@ -105,9 +105,7 @@ impl<'a> GeneratorContext<'a> {
                 kind: SymbolKind::Nonterminal { productions, .. }, ..
             } = nonterminal else { unreachable!() };
 
-            let has_epsilon = productions.iter().any(
-                |&id| self.interned_symbols.production(id).rhs.len() == 0
-            );
+            let has_epsilon = productions.iter().any(|&id| self.interned_symbols.production(id).rhs.len() == 0);
             if has_epsilon {
                 self.epsilon_nonterminals.insert(nonterminal.id);
             }
@@ -129,7 +127,7 @@ impl<'a> GeneratorContext<'a> {
                 let has_epsilon = productions.iter().any(
                     |&id| {
                         let production = self.interned_symbols.production(id);
-                        production.rhs.iter().all(|sym| self.epsilon_nonterminals.get(sym).is_some())
+                        production.rhs.iter().all(|sym| self.epsilon_nonterminals.contains(sym))
                 });
                 if has_epsilon {
                     changed = true;
@@ -145,15 +143,12 @@ impl<'a> GeneratorContext<'a> {
                 kind: SymbolKind::Nonterminal { productions, .. }, ..
             } = nonterminal else { unreachable!() };
 
-            for &production_id in productions.iter() {
+            for &production_id in productions {
                 let production = self.interned_symbols.production(production_id);
 
-                for &symbol_id in production.rhs.iter() {
-                    match self.interned_symbols.symbol(symbol_id) {
-                        Symbol { kind: SymbolKind::Terminal { .. }, .. } => {
-                            self.first_sets[self.interned_symbols.nonterminal_index(nonterminal.id)].add(symbol_id);
-                        }
-                        _ => {}
+                for &symbol_id in &production.rhs {
+                    if matches!(self.interned_symbols.symbol(symbol_id), Symbol { kind: SymbolKind::Terminal { .. }, .. }) {
+                        self.first_sets[self.interned_symbols.nonterminal_index(nonterminal.id)].add(symbol_id);
                     }
 
                     if !self.epsilon_nonterminals.contains(&symbol_id) {
@@ -222,11 +217,12 @@ impl<'a> GeneratorContext<'a> {
     fn first_set<T: Iterator<Item = SymbolId>>(&self, symbols: T) -> LookaheadSet {
         let mut result = LookaheadSet::new(self.interned_symbols.nonterminals.len());
         for symbol_id in symbols {
-            match self.interned_symbols.symbol(symbol_id) {
-                Symbol { kind: SymbolKind::Terminal { .. }, .. } => result.add(symbol_id),
-                _ => {
-                    result.inplace_union(&self.first_sets[self.interned_symbols.nonterminal_index(symbol_id)]);
-                },
+            if matches!(self.interned_symbols.symbol(symbol_id), Symbol { kind: SymbolKind::Terminal { .. }, .. }) {
+                result.inplace_union(&self.first_sets[self.interned_symbols.nonterminal_index(symbol_id)]);
+            }
+
+            if !self.epsilon_nonterminals.contains(&symbol_id) {
+                break;
             }
         }
         result
@@ -341,23 +337,30 @@ impl<'a> GeneratorContext<'a> {
         next_interned_collection
     }
 
-    pub fn compute_canonical_collection(&mut self, production_id: ProductionId) {
-        let interned_item = self.zero_items[production_id.0 as usize];
+    pub fn compute_canonical_collection<T: Iterator<Item = ProductionId>>(
+        &mut self,
+        production_ids: T,
+    ) -> HashMap<ProductionId, InternedCanonicalCollection> {
+        let mut entrypoint_states: HashMap<ProductionId, InternedCanonicalCollection> = HashMap::new();
+        for production_id in production_ids {
+            let interned_item = self.zero_items[production_id.0 as usize];
+            let mut lookahead = LookaheadSet::new(self.interned_symbols.terminals.len());
+            lookahead.add(EOF_ID);
 
-        let mut lookahead = LookaheadSet::new(self.interned_symbols.terminals.len());
-        lookahead.add(EOF_ID);
-        let entry_state = ParserState {
-            items: vec![interned_item],
-            lookahead: HashMap::from([(interned_item, lookahead)])
-        };
-        self.compute_closure(entry_state);
+            let entry_state = ParserState {
+                items: vec![interned_item],
+                lookahead: HashMap::from([(interned_item, lookahead)])
+            };
+            let interned_collection = self.compute_closure(entry_state);
+            entrypoint_states.insert(production_id, interned_collection);
+        }
 
+        let mut transitions = std::mem::take(&mut self.transitions);
         let mut changed = true;
         while changed {
             changed = false;
             // Further attempts at appeasing the borrow checker
             let mut buffer = Vec::new();
-            let mut transitions: HashMap<(InternedCanonicalCollection, SymbolId), InternedCanonicalCollection> = HashMap::new();
 
             for (collection, &interned_collection) in &self.canonical_collections_lookup {
                 for &interned_item in &collection.0 {
@@ -384,8 +387,27 @@ impl<'a> GeneratorContext<'a> {
                 let next_interned = self.compute_goto(interned_collection, symbol);
                 self.precomputed_gotos.insert((interned_collection, symbol.id), next_interned);
             }
+        }
+    
+        self.transitions = transitions;
+        entrypoint_states
+    }
 
-            self.transitions.extend(transitions);
+    pub fn compute_table(&mut self) {
+        let production_ids = self.interned_symbols.nonterminals.iter()
+            .map(|sym| {
+                if let Symbol { kind: SymbolKind::Nonterminal { entrypoint: true, productions }, ..} = sym {
+                    assert_eq!(productions.len(), 1);
+                    Some(productions[0])
+                }
+                else {
+                    None
+                }
+            })
+            .flatten();
+
+        for (collection, interned_collection) in &self.canonical_collections_lookup {
+
         }
     }
 } 
