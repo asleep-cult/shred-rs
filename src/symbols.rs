@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Copy)]
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
 pub struct SymbolId(pub u16);
 
 pub const EOF_ID: SymbolId = SymbolId(0);
 
-#[derive(Clone, Copy)]
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
 pub struct ProductionId(pub u16);
 
 
@@ -43,6 +43,15 @@ impl InternedSymbols {
 
     pub fn search_nonterminal(&self, name: &str) -> Option<&Symbol> {
         self.nonterminal_map.get(name).map(|&id| &self.nonterminals[self.nonterminal_index(id)])
+    }
+
+    pub fn symbol(&self, id: SymbolId) -> &Symbol {
+        if (id.0 as usize) < self.terminals.len() {
+            self.terminal(id)
+        }
+        else {
+            self.nonterminal(id)
+        }
     }
 
     pub fn terminal(&self, id: SymbolId) -> &Symbol {

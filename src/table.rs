@@ -2,12 +2,12 @@ use std::io;
 
 use crate::symbols::{InternedSymbols, ProductionId, Symbol, SymbolId, EOF_ID};
 
-#[derive(Clone, Copy)]
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
 pub struct StateId(pub u16);
 
 const UNSET_GOTO: u16 = 0;
 
-#[derive(Clone, Copy)]
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ActionKind {
     Reject,
     Shift(StateId),
@@ -78,7 +78,7 @@ pub struct GotoConflict {
 }
 
 pub struct ParseTable<'a> {
-    interned_symbols: &'a InternedSymbols,
+    pub interned_symbols: &'a InternedSymbols,
     number_of_states: u16,
     actions: Box<[u16]>,
     gotos: Box<[u16]>,
@@ -115,7 +115,7 @@ impl<'a> ParseTable<'a> {
 
     pub fn goto(&self, state_id: StateId, symbol_id: SymbolId) -> Option<StateId> {
         match self.gotos[self.goto_index(state_id, symbol_id)] {
-            0 => None,
+            UNSET_GOTO => None,
             value => Some(StateId(value - 1)),
         }
     }
@@ -200,7 +200,7 @@ impl<'a> ParseTable<'a> {
             Some(existing_entry) =>
                 Err(GotoConflict { state_id, symbol_id, existing_entry, new_entry: next_state_id }),
             None => {
-                self.gotos[self.goto_index(state_id, symbol_id)] = next_state_id.0;
+                self.gotos[self.goto_index(state_id, symbol_id)] = next_state_id.0 + 1;
                 Ok(())
             }
         }
