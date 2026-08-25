@@ -1,18 +1,23 @@
 use crate::ast::{RuleId, AstArena, RuleKind};
 use crate::symbols::{InternedSymbols, NonterminalProduction, SymbolId, Symbol, SymbolKind};
 
-enum LoweringErrorKind {
+#[derive(Debug)]
+pub enum LoweringErrorKind {
     UnknownName(String),
     UnknownTerminal(String),
 }
 
-struct LoweringContext {
+pub struct LoweringContext {
     interned_symbols: InternedSymbols,
     implicit_nonterminal_count: u32,
 }
 
 impl LoweringContext {
-    pub fn lower_symbols(&mut self, arena: AstArena) -> Result<(), LoweringErrorKind> {
+    pub fn new() -> Self {
+        LoweringContext { interned_symbols: InternedSymbols::new(), implicit_nonterminal_count: 0 }
+    }
+
+    pub fn lower_symbols(mut self, arena: AstArena) -> Result<InternedSymbols, LoweringErrorKind> {
         for terminal in arena.terminals.into_iter() {
             self.interned_symbols.add_terminal(
                 self.interned_symbols.next_sym_id(),
@@ -45,7 +50,7 @@ impl LoweringContext {
                 self.interned_symbols.add_production(sym_production);
             }
         }
-        Ok(())
+        Ok(self.interned_symbols)
     }
 
     fn add_implicit_nonterminal(&mut self, prefix: &str) -> SymbolId {

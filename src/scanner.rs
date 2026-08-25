@@ -2,6 +2,7 @@
 
 use std::{iter::Peekable, str::CharIndices};
 
+#[derive(Debug)]
 pub enum TokenKind {
     At,
     Colon,
@@ -13,6 +14,7 @@ pub enum TokenKind {
     Question,
     Equal,
     Arrow,
+    Newline,
 
     Identifier(String),
     String(String),
@@ -25,14 +27,16 @@ pub struct Scanner<'a> {
     source: &'a str,
     chars: Peekable<CharIndices<'a>>,
     level: u32,
+    newline: bool,
 }
 
 impl<'a> Scanner<'a> {
-    fn new(source: &'a str) -> Self {
+    pub fn new(source: &'a str) -> Self {
         Scanner {
             source,
             chars: source.char_indices().peekable(),
             level: 0,
+            newline: false,
         }
     }
 
@@ -49,8 +53,18 @@ impl<'a> Scanner<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(' ' | '\t' | '\r' | '\n') = self.peek() {
-            self.advance();
+        while let Some(char) = self.peek() {
+            match char {
+                ' ' | '\t' | '\r' => {
+                    self.advance();
+                }
+                '\n' if self.newline || self.level > 0 => {
+                    self.advance();
+                }
+                _ => {
+                    break;
+                }
+            }
         }
     }
 
@@ -64,7 +78,7 @@ impl<'a> Scanner<'a> {
     fn scan_string(&mut self, start: usize) -> Option<String> {
         while let Some((_, character)) = self.advance() {
             if character == '"' {
-                return Some(self.source[start..self.position()].to_string())
+                return Some(self.source[start + 1..self.position() - 1].to_string())
             }
         }
         None
@@ -78,6 +92,7 @@ impl<'a> Scanner<'a> {
             None => return TokenKind::Eof,
         };
 
+        self.newline = false;
         match character {
             '@' => TokenKind::At,
             ':' => TokenKind::Colon,
@@ -107,6 +122,10 @@ impl<'a> Scanner<'a> {
                     TokenKind::Equal
                 }
             },
+            '\n' => {
+                self.newline = true;
+                TokenKind::Newline
+            }
             'a'..='z' | 'A'..='Z' | '_' => TokenKind::Identifier(self.scan_identifier(start)),
             '"' => match self.scan_string(start) {
                 Some(content) => TokenKind::String(content),

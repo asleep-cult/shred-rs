@@ -1,25 +1,28 @@
 use std::collections::HashMap;
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct SymbolId(pub u16);
 
 pub const EOF_ID: SymbolId = SymbolId(0);
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct ProductionId(pub u16);
 
 
+#[derive(Debug)]
 pub enum SymbolKind {
     Nonterminal { entrypoint: bool, productions: Vec<ProductionId> },
     Terminal { value: Option<String> },
 }
 
+#[derive(Debug)]
 pub struct Symbol {
     pub id: SymbolId,
     pub name: String,
     pub kind: SymbolKind,
 }
 
+#[derive(Debug)]
 pub struct NonterminalProduction {
     pub id: ProductionId,
     pub lhs_id: SymbolId,
@@ -27,18 +30,32 @@ pub struct NonterminalProduction {
     pub action: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct InternedSymbols {
     pub(crate) terminals: Vec<Symbol>,
     pub(crate) nonterminals: Vec<Symbol>,
     pub(crate) productions: Vec<NonterminalProduction>,
-    terminal_map: HashMap<String, SymbolId>,
+    pub terminal_map: HashMap<String, SymbolId>,
     nonterminal_map: HashMap<String, SymbolId>,
     prod_id_count: u16,
 }
 
 impl InternedSymbols {
+    pub fn new() -> Self {
+        let mut interned_symbols = InternedSymbols {
+            terminals: Vec::new(),
+            nonterminals: Vec::new(),
+            productions: Vec::new(),
+            terminal_map: HashMap::new(),
+            nonterminal_map: HashMap::new(),
+            prod_id_count: 0,
+        };
+        interned_symbols.add_terminal(EOF_ID, String::from("EOF"), None);
+        interned_symbols
+    }
+
     pub fn search_terminal(&self, name: &str) -> Option<&Symbol> {
-        self.terminal_map.get(name).map(|&id| &self.nonterminals[self.terminal_index(id)])
+        self.terminal_map.get(name).map(|&id| &self.terminals[self.terminal_index(id)])
     }
 
     pub fn search_nonterminal(&self, name: &str) -> Option<&Symbol> {
@@ -91,8 +108,7 @@ impl InternedSymbols {
     }
 
     pub fn next_sym_id(&self) -> SymbolId {
-        // SymbolId(0) reserved for EOF
-        SymbolId((self.terminals.len() + self.nonterminals.len() + 1) as u16)
+        SymbolId((self.terminals.len() + self.nonterminals.len()) as u16)
     }
 
     pub fn next_prod_id(&mut self) -> ProductionId {

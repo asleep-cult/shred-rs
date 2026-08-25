@@ -2,12 +2,12 @@ use std::io;
 
 use crate::symbols::{InternedSymbols, ProductionId, Symbol, SymbolId, EOF_ID};
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct StateId(pub u16);
 
 const UNSET_GOTO: u16 = 0;
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum ActionKind {
     Reject,
     Shift(StateId),
@@ -54,12 +54,14 @@ impl From<u16> for ActionKind {
     }
 }
 
+#[derive(Debug)]
 pub enum ActionConflictKind {
     Impossible,  // Indicates an internal error with the parser generator
     Unrecoverable,  // Indacates a grammar is not LR(1)
     Recovered,  // A shift/reduce conflict that defaulted to the shift
 }
 
+#[derive(Debug)]
 pub struct ActionConflict {
     pub kind: ActionConflictKind,
     pub state_id: StateId,
@@ -68,6 +70,7 @@ pub struct ActionConflict {
     pub new_entry: ActionKind,
 }
 
+#[derive(Debug)]
 pub struct GotoConflict {
     // This is an impossible conflict that can arise under the same 
     // circumstances of ActionConflictKind::Impossible
@@ -79,27 +82,36 @@ pub struct GotoConflict {
 
 pub struct ParseTable<'a> {
     pub interned_symbols: &'a InternedSymbols,
-    number_of_states: u16,
+    number_of_states: usize,
     actions: Box<[u16]>,
     gotos: Box<[u16]>,
 }
 
 impl<'a> ParseTable<'a> {
+    pub fn new(interned_symbols: &'a InternedSymbols, number_of_states: usize) -> Self {
+        ParseTable {
+            interned_symbols,
+            number_of_states,
+            actions: vec![0; number_of_states * interned_symbols.terminals.len()].into_boxed_slice(),
+            gotos: vec![0; number_of_states * interned_symbols.nonterminals.len()].into_boxed_slice(),
+        }
+    }
+
     pub fn action_index(&self, state_id: StateId, symbol_id: SymbolId) -> usize {
-        (state_id.0 as usize * self.interned_symbols.terminals.len()) + symbol_id.0 as usize
+        (state_id.0 as usize * self.interned_symbols.terminals.len()) + self.interned_symbols.terminal_index(symbol_id)
     }
 
     pub fn goto_index(&self, state_id: StateId, symbol_id: SymbolId) -> usize {
-        (state_id.0 as usize * self.interned_symbols.nonterminals.len()) + symbol_id.0 as usize
+        (state_id.0 as usize * self.interned_symbols.nonterminals.len()) + self.interned_symbols.nonterminal_index(symbol_id)
     }
 
-    pub fn all_actions(&self, state_id: StateId) -> impl Iterator<Item = ActionKind> {
+    pub fn all_actions(&self, state_id: StateId) -> impl Iterator<Item = ActionKind> + use<'_> {
         let terminals = self.interned_symbols.terminals.len();
         let state_id = state_id.0 as usize;
         self.actions[state_id * terminals..(state_id + 1) * terminals].iter().copied().map(Into::into)
     }
 
-    pub fn all_gotos(&self, state_id: StateId) -> impl Iterator<Item = StateId> {
+    pub fn all_gotos(&self, state_id: StateId) -> impl Iterator<Item = StateId> + use<'_> {
         let nonterminals = self.interned_symbols.nonterminals.len();
         let state_id = state_id.0 as usize;
         self.gotos[state_id * nonterminals..(state_id + 1) * nonterminals]
@@ -190,7 +202,7 @@ impl<'a> ParseTable<'a> {
         }
     }
 
-    fn add_goto(
+    pub fn add_goto(
         &mut self,
         state_id: StateId,
         symbol_id: SymbolId,
@@ -208,20 +220,20 @@ impl<'a> ParseTable<'a> {
 
     pub fn action_map(&self, state_id: StateId) -> impl Iterator<Item = (&Symbol, ActionKind)> {
         self.all_actions(state_id)
-            .filter(|act| !matches!(act, ActionKind::Reject))
             .enumerate()
-            .map(|(idx, act)| (&self.interned_symbols.terminals[idx], act))
+            .filter(|(_, act)| !matches!(act, ActionKind::Reject))
+            .map(move |(idx, act)| (&self.interned_symbols.terminals[idx], act))
     }
 
     pub fn goto_map(&self, state_id: StateId) -> impl Iterator<Item = (&Symbol, StateId)> {
         self.all_gotos(state_id)
             .enumerate()
-            .map(|(idx, state_id)| (&self.interned_symbols.nonterminals[idx], state_id))
+            .map(move |(idx, state_id)| (&self.interned_symbols.nonterminals[idx], state_id))
     }
 
     pub fn dump_table<T: io::Write>(&self, writer: &mut T) -> io::Result<()> {
         for idx in 0..self.number_of_states {
-            let state_id = StateId(idx);
+            let state_id = StateId(idx as u16);
             write!(writer, "<state #{}>", idx)?;
 
             let actions: Vec<(&Symbol, ActionKind)> = self.action_map(state_id).collect();

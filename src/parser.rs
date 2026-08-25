@@ -3,6 +3,7 @@ use std::iter::Peekable;
 use crate::ast::{RuleId, ArenaRange, AstArena, RuleKind};
 use crate::scanner::{Scanner, TokenKind};
 
+#[derive(Debug)]
 pub enum GrammarErrorKind {
     InvalidTerminalDef,
     InvalidNonterminalDef,
@@ -11,6 +12,7 @@ pub enum GrammarErrorKind {
     Eof,
 }
 
+#[derive(Debug)]
 pub struct GrammarError {
     pub kind: GrammarErrorKind,
     pub token: Option<TokenKind>,
@@ -22,21 +24,29 @@ pub struct GrammarParser<'a> {
 }
 
 impl<'a> GrammarParser<'a> {
-    fn new(scanner: Scanner<'a>) -> Self {
+    pub fn new(scanner: Scanner<'a>) -> Self {
         Self {
             arena: AstArena::new(),
             scanner: scanner.peekable()
         }
     }
 
-    pub fn parse_ast(mut self) -> AstArena {
+    pub fn parse_ast(mut self) -> Result<AstArena, GrammarError> {
         while let Some(_) = self.scanner.peek() {
-            self.parse_toplevel_item();
+            self.parse_toplevel_item()?;
         }
-        self.arena
+        Ok(self.arena)
+    }
+
+    pub fn skip_newline(&mut self) {
+        if let Some(TokenKind::Newline) = self.scanner.peek() {
+            self.scanner.next();
+        }
     }
 
     fn parse_toplevel_item(&mut self) -> Result<(), GrammarError> {
+        self.skip_newline();
+
         match self.scanner.next() {
             Some(token @ TokenKind::At) => self.parse_nonterminal_def(token),
             Some(token) => match self.parse_terminal_def(token) {
@@ -65,12 +75,12 @@ impl<'a> GrammarParser<'a> {
                 }
             }
             Some(TokenKind::Colon) => Err(GrammarError { kind: GrammarErrorKind::MaybeNonterminal, token: Some(token) }),
-            _ => {
-                let TokenKind::Identifier(name) = token else {
-                    return Err(GrammarError { kind: GrammarErrorKind::InvalidTerminalDef, token: Some(token) });
-                };
-                self.arena.add_terminal(name, None);
-                Ok(())
+            _ => match token {
+                TokenKind::Identifier(name) => {
+                    self.arena.add_terminal(name, None);
+                    Ok(())
+                }
+                _ => Err(GrammarError { kind: GrammarErrorKind::InvalidTerminalDef, token: Some(token) })
             }
         }
     }
@@ -90,10 +100,16 @@ impl<'a> GrammarParser<'a> {
             next => return Err(GrammarError { kind: GrammarErrorKind::InvalidNonterminalDef, token: next })
         }
 
+        self.skip_newline();
         let start = self.arena.production_bound();
+        self.scanner.next_if(|tok| matches!(tok, TokenKind::VerticalBar));
+        self.parse_production()?;
+
+        self.skip_newline();
         while let Some(TokenKind::VerticalBar) = self.scanner.peek() {
             self.scanner.next();
             self.parse_production()?;
+            self.skip_newline();
         }
         let end = self.arena.production_bound();
         self.arena.add_nonterminal(name, entrypoint, end - start);
@@ -103,14 +119,15 @@ impl<'a> GrammarParser<'a> {
     fn parse_production(&mut self) -> Result<(), GrammarError> {
         let rule = self.parse_rule_group()?;
         let action = match self.scanner.peek() {
-            Some(TokenKind::Identifier(_)) => {
-                let Some(TokenKind::Identifier(action)) = self.scanner.next() else {
-                    unreachable!()
-                };
-                // I did this instead of using the match arm because the action is &&str
-                // from peek. The compiler implores me to use .map(|v| &**v) which seems
-                // cursed to an innocent Python dev like myself.
-                Some(action)
+            Some(TokenKind::Arrow) => {
+                self.scanner.next();
+                self.skip_newline();
+                match self.scanner.next() {
+                    Some(TokenKind::Identifier(action)) => Some(action),
+                    token => {
+                        return Err(GrammarError { kind: GrammarErrorKind::InvalidNonterminalDef, token });
+                    }
+                }
             },
             _ => None,
         };
@@ -132,7 +149,15 @@ impl<'a> GrammarParser<'a> {
         else {
             self.arena.add_rule(RuleKind::Group { items: ArenaRange { start, end } })
         };
-        Ok(rule)
+
+        if let Some(TokenKind::VerticalBar) = self.scanner.peek() {
+            self.scanner.next();
+            let right = self.parse_rule_group()?;
+            Ok(self.arena.add_rule(RuleKind::Alternative { left: rule, right }))
+        }
+        else {
+            Ok(rule)
+        }
     }
 
     fn parse_rule_group_item(&mut self) -> Result<RuleId, GrammarError> {
