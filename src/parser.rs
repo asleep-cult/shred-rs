@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use crate::ast::{RuleId, ArenaRange, AstArena, RuleKind};
+use crate::ast::{RuleId, AstArena, RuleKind};
 use crate::scanner::{Scanner, TokenKind};
 
 #[derive(Debug)]
@@ -137,17 +137,16 @@ impl<'a> GrammarParser<'a> {
     }
 
     fn parse_rule_group(&mut self) -> Result<RuleId, GrammarError> {
-        let start = self.arena.rule_bound();
+        let mut items = Vec::new();
         while let Some(TokenKind::OpenParen | TokenKind::Identifier(_) | TokenKind::String(_)) = self.scanner.peek() {
-            self.parse_rule_group_item()?;
+            items.push(self.parse_rule_group_item()?);
         }
-        let end = self.arena.rule_bound();
 
-        let rule = if start + 1 == end {
-            RuleId(start as u16)
+        let rule = if items.len() == 0 {
+            items[0]
         }
         else {
-            self.arena.add_rule(RuleKind::Group { items: ArenaRange { start, end } })
+            self.arena.add_rule(RuleKind::Group { items })
         };
 
         if let Some(TokenKind::VerticalBar) = self.scanner.peek() {

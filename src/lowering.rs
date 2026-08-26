@@ -138,8 +138,8 @@ impl LoweringContext {
                 self.interned_symbols.add_production(right_production);
             }
             RuleKind::Group { items } => {
-                for i in items.start..items.end {
-                    self.initialize_production(rules, RuleId(i as u16), production)?;
+                for &item in items {
+                    self.initialize_production(rules, item, production)?;
                 } 
             }
             RuleKind::String(content) => {
@@ -189,7 +189,7 @@ impl LoweringContext {
         let mut star_production = NonterminalProduction {
             id: self.interned_symbols.next_prod_id(),
             lhs_id: id,
-            rhs: Vec::new(),
+            rhs: vec![id],
             action: Some(String::from("@sequence")),
         };
         self.initialize_production(rules, rule, &mut star_production)?;

@@ -139,7 +139,7 @@ impl<'a> ParseTable<'a> {
                 self.actions[self.action_index(state_id, EOF_ID)] = new_entry.into();
                 Ok(())
             },
-            existing_entry => {
+            existing_entry if existing_entry != new_entry => {
                 let conflict = ActionConflict {
                     kind: ActionConflictKind::Unrecoverable,
                     state_id,
@@ -149,6 +149,7 @@ impl<'a> ParseTable<'a> {
                 };
                 Err(conflict)
             }
+            _ => Ok(())
         }
     }
 
@@ -164,7 +165,7 @@ impl<'a> ParseTable<'a> {
                 self.actions[self.action_index(state_id, symbol_id)] = new_entry.into();
                 Ok(())
             }
-            existing_entry => {
+            existing_entry if existing_entry != new_entry => {
                 let kind = match existing_entry {
                     ActionKind::Reject => unreachable!(),
                     ActionKind::Shift(_) => ActionConflictKind::Impossible,
@@ -175,7 +176,8 @@ impl<'a> ParseTable<'a> {
                     ActionKind::Accept(_) => ActionConflictKind::Unrecoverable,
                 };
                 Err(ActionConflict { kind, state_id, symbol_id, existing_entry, new_entry })
-            } 
+            }
+            _ => Ok(())
         }
     }
 
@@ -191,7 +193,7 @@ impl<'a> ParseTable<'a> {
                 self.actions[self.action_index(state_id, symbol_id)] = new_entry.into();
                 Ok(())
             }
-            existing_entry => {
+            existing_entry if existing_entry != new_entry => {
                 let kind = match existing_entry {
                     ActionKind::Reject => unreachable!(),
                     ActionKind::Shift(_) => ActionConflictKind::Recovered,
@@ -199,6 +201,7 @@ impl<'a> ParseTable<'a> {
                 };
                 Err(ActionConflict { kind, state_id, symbol_id, existing_entry, new_entry })
             }
+            _ => Ok(())
         }
     }
 
@@ -209,12 +212,13 @@ impl<'a> ParseTable<'a> {
         next_state_id: StateId,
     ) -> Result<(), GotoConflict> {
         match self.goto(state_id, symbol_id) {
-            Some(existing_entry) =>
+            Some(existing_entry) if existing_entry != next_state_id =>
                 Err(GotoConflict { state_id, symbol_id, existing_entry, new_entry: next_state_id }),
             None => {
                 self.gotos[self.goto_index(state_id, symbol_id)] = next_state_id.0 + 1;
                 Ok(())
             }
+            _ => Ok(())
         }
     }
 
@@ -226,9 +230,14 @@ impl<'a> ParseTable<'a> {
     }
 
     pub fn goto_map(&self, state_id: StateId) -> impl Iterator<Item = (&Symbol, StateId)> {
-        self.all_gotos(state_id)
+        let nonterminals = self.interned_symbols.nonterminals.len();
+        let state_id = state_id.0 as usize;
+        self.gotos[state_id * nonterminals..(state_id + 1) * nonterminals]
+            .iter()
+            .copied()
             .enumerate()
-            .map(move |(idx, state_id)| (&self.interned_symbols.nonterminals[idx], state_id))
+            .filter(|&(_, n)| n != UNSET_GOTO)
+            .map(|(idx, n)| (&self.interned_symbols.nonterminals[idx], StateId(n - 1)))
     }
 
     pub fn dump_table<T: io::Write>(&self, writer: &mut T) -> io::Result<()> {

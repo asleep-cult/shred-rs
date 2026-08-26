@@ -4,12 +4,6 @@
 pub struct RuleId(pub u16);
 
 #[derive(Debug)]
-pub struct ArenaRange {
-    pub start: usize,
-    pub end: usize,
-}
-
-#[derive(Debug)]
 pub struct AstArena {
     pub(crate) terminals: Vec<TerminalDef>,
     pub(crate) nonterminals: Vec<NonterminalDef>,
@@ -79,7 +73,7 @@ pub enum RuleKind {
     Plus(RuleId),
     Optional(RuleId),
     Alternative { left: RuleId, right: RuleId },
-    Group { items: ArenaRange },
+    Group { items: Vec<RuleId> },
     String(String),
     Name(String),
 }

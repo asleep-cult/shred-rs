@@ -1,6 +1,8 @@
+use core::fmt;
 use std::collections::HashMap;
+use std::fmt::Write;
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct SymbolId(pub u16);
 
 pub const EOF_ID: SymbolId = SymbolId(0);
@@ -22,6 +24,38 @@ pub struct Symbol {
     pub kind: SymbolKind,
 }
 
+impl Symbol {
+    pub fn written_as(&self) -> String {
+        match self {
+            Symbol { kind: SymbolKind::Terminal { value: Some(value) }, .. } => format!("\"{}\"", value),
+            Symbol { name, .. } => name.clone(),
+        }
+    }
+
+    pub fn format_string(&self, interned: &InternedSymbols, buffer: &mut String) -> Result<(), fmt::Error> {
+        match self {
+            Symbol { kind: SymbolKind::Nonterminal { productions, .. }, .. } => {
+                write!(buffer, "<nonterminal-def: {}>:\n", self.name)?;
+                
+                for &production_id in productions {
+                    write!(buffer, "|")?;
+                    
+                    let production = interned.production(production_id);
+                    for &symbol_id in &production.rhs {
+                        let symbol = interned.symbol(symbol_id);
+                        write!(buffer, " {}", symbol.written_as())?;
+                    }
+                    write!(buffer, "\n")?;
+                }
+            }
+            Symbol { kind: SymbolKind::Terminal { .. }, ..} => {
+                write!(buffer, "{}", self.written_as())?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct NonterminalProduction {
     pub id: ProductionId,
@@ -34,7 +68,7 @@ pub struct NonterminalProduction {
 pub struct InternedSymbols {
     pub(crate) terminals: Vec<Symbol>,
     pub(crate) nonterminals: Vec<Symbol>,
-    pub(crate) productions: Vec<NonterminalProduction>,
+    pub(crate) productions: HashMap<ProductionId, NonterminalProduction>,
     pub terminal_map: HashMap<String, SymbolId>,
     nonterminal_map: HashMap<String, SymbolId>,
     prod_id_count: u16,
@@ -45,7 +79,7 @@ impl InternedSymbols {
         let mut interned_symbols = InternedSymbols {
             terminals: Vec::new(),
             nonterminals: Vec::new(),
-            productions: Vec::new(),
+            productions: HashMap::new(),
             terminal_map: HashMap::new(),
             nonterminal_map: HashMap::new(),
             prod_id_count: 0,
@@ -80,7 +114,7 @@ impl InternedSymbols {
     }
 
     pub fn production(&self, id: ProductionId) -> &NonterminalProduction {
-        &self.productions[id.0 as usize]
+        &self.productions[&id]
     }
 
     pub fn add_terminal(&mut self, id: SymbolId, name: String, value: Option<String>) { 
@@ -124,6 +158,6 @@ impl InternedSymbols {
         } = &mut self.nonterminals[index] else { unreachable!() };
 
         productions.push(production.id);
-        self.productions.push(production);
+        self.productions.insert(production.id, production);
     }
 }

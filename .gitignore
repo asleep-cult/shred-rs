@@ -1,1 +1,6 @@
 /target
+main.exe
+main.pdb
+grammar_test
+expected.txt
+gram
