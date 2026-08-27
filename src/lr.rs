@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use rustc_hash::FxHasher;
 use std::hash::Hasher;
 
-use crate::symbols::{InternedSymbols, ProductionId};
+use crate::symbols::{InternedSymbols, ProductionId, SymbolId};
 use crate::bitset::{Bitset, BitsetData};
 use crate::table::StateId;
 
@@ -13,6 +13,12 @@ pub type LookaheadSet = Bitset<[u64; LOOKAHEAD_SET_SIZE]>;
 pub struct Lr1Item {
     pub index: usize,
     pub lookahead: LookaheadSet,
+}
+
+pub struct CanonicalCollection {
+    pub context: LRContext,
+    pub transitions: HashMap<(StateId, SymbolId), StateId>,
+    pub epsilon_transitions: Vec<(StateId, Lr1Item)>,
 }
 
 pub struct LRContext {

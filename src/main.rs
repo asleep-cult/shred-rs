@@ -4,10 +4,11 @@ mod parser;
 mod symbols;
 mod lowering;
 mod table;
-mod generator;
+mod computation;
 mod errors;
 mod bitset;
 mod lr;
+mod generator;
 
 fn main() {
     let source = std::fs::read_to_string("./grammar_test").unwrap();
@@ -24,9 +25,12 @@ fn main() {
     //    print!("{}", buffer);
     //}
 
-    let mut ctx = generator::ComputationEngine::new(&interned_symbols);
-    let table = ctx.compute_table();
-    //let mut fp = std::fs::File::create("./table.out").unwrap();
+    let ctx = computation::ComputationEngine::new(&interned_symbols);
+    let collection = ctx.compute_canonical_collection();
+
+    let mut generator = generator::TableGenerator::new(&interned_symbols, collection);
+    let table = generator.generate_table();
+    let mut fp = std::fs::File::create("./table.out").unwrap();
     println!("done");
-    //table.dump_table(&mut fp).unwrap();
+    table.dump_table(&mut fp).unwrap();
 }
