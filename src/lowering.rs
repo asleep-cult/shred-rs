@@ -8,17 +8,27 @@ pub enum LoweringErrorKind {
 }
 
 pub struct LoweringContext {
+    arena: AstArena,
     interned_symbols: InternedSymbols,
     implicit_nonterminal_count: u32,
 }
 
 impl LoweringContext {
-    pub fn new() -> Self {
-        LoweringContext { interned_symbols: InternedSymbols::new(), implicit_nonterminal_count: 0 }
+    pub fn new(arena: AstArena) -> Self {
+        LoweringContext {
+            interned_symbols: InternedSymbols::new(),
+            arena,
+            implicit_nonterminal_count: 0,
+        }
     }
 
-    pub fn lower_symbols(mut self, arena: AstArena) -> Result<InternedSymbols, LoweringErrorKind> {
-        for terminal in arena.terminals.into_iter() {
+    pub fn lower_symbols(mut self) -> Result<InternedSymbols, LoweringErrorKind> {
+        let terminals = std::mem::take(&mut self.arena.terminals);
+        let nonterminals = std::mem::take(&mut self.arena.nonterminals);
+        let productions = std::mem::take(&mut self.arena.productions);
+        let rules = std::mem::take(&mut self.arena.rules);
+
+        for terminal in terminals.into_iter() {
             self.interned_symbols.add_terminal(
                 self.interned_symbols.next_sym_id(),
                 terminal.name,
@@ -26,8 +36,8 @@ impl LoweringContext {
             );
         }
 
-        let mut prod_ranges: Vec<(SymbolId, usize)> = Vec::with_capacity(arena.nonterminals.len());
-        for nonterminal in arena.nonterminals.into_iter() {
+        let mut prod_ranges: Vec<(SymbolId, usize)> = Vec::with_capacity(nonterminals.len());
+        for nonterminal in nonterminals.into_iter() {
             let id = self.interned_symbols.next_sym_id();
             self.interned_symbols.add_nonterminal(
                 id,
@@ -37,7 +47,7 @@ impl LoweringContext {
             prod_ranges.push((id, nonterminal.productions))
         }
 
-        let mut prod_iterator = arena.productions.into_iter();
+        let mut prod_iterator = productions.into_iter();
         for (symbol_id, size) in prod_ranges.into_iter() {
             for production in prod_iterator.by_ref().take(size) {
                 let mut sym_production = NonterminalProduction {
@@ -46,7 +56,7 @@ impl LoweringContext {
                     rhs: Vec::new(),
                     action: production.action,
                 };
-                self.initialize_production(&arena.rules, production.rule, &mut sym_production)?;
+                self.initialize_production(&rules, production.rule, &mut sym_production)?;
                 self.interned_symbols.add_production(sym_production);
             }
         }

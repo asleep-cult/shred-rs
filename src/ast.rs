@@ -42,10 +42,6 @@ impl AstArena {
     pub fn production_bound(&self) -> usize {
         self.productions.len()
     }
-
-    pub fn rule_bound(&self) -> usize {
-        self.rules.len()
-    }
 }
 
 #[derive(Debug)]

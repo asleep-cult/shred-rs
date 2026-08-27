@@ -7,7 +7,7 @@ pub struct SymbolId(pub u16);
 
 pub const EOF_ID: SymbolId = SymbolId(0);
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct ProductionId(pub u16);
 
 
@@ -56,7 +56,7 @@ impl Symbol {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NonterminalProduction {
     pub id: ProductionId,
     pub lhs_id: SymbolId,
@@ -68,10 +68,9 @@ pub struct NonterminalProduction {
 pub struct InternedSymbols {
     pub(crate) terminals: Vec<Symbol>,
     pub(crate) nonterminals: Vec<Symbol>,
-    pub(crate) productions: HashMap<ProductionId, NonterminalProduction>,
+    pub(crate) productions: Vec<Option<NonterminalProduction>>,
     pub terminal_map: HashMap<String, SymbolId>,
     nonterminal_map: HashMap<String, SymbolId>,
-    prod_id_count: u16,
 }
 
 impl InternedSymbols {
@@ -79,13 +78,16 @@ impl InternedSymbols {
         let mut interned_symbols = InternedSymbols {
             terminals: Vec::new(),
             nonterminals: Vec::new(),
-            productions: HashMap::new(),
+            productions: Vec::new(),
             terminal_map: HashMap::new(),
             nonterminal_map: HashMap::new(),
-            prod_id_count: 0,
         };
         interned_symbols.add_terminal(EOF_ID, String::from("EOF"), None);
         interned_symbols
+    }
+
+    pub fn iter_productions(&self) -> impl Iterator<Item = &NonterminalProduction> {
+        self.productions.iter().map(|prod| prod.as_ref().unwrap())
     }
 
     pub fn search_terminal(&self, name: &str) -> Option<&Symbol> {
@@ -114,7 +116,7 @@ impl InternedSymbols {
     }
 
     pub fn production(&self, id: ProductionId) -> &NonterminalProduction {
-        &self.productions[&id]
+        self.productions[id.0 as usize].as_ref().unwrap()
     }
 
     pub fn add_terminal(&mut self, id: SymbolId, name: String, value: Option<String>) { 
@@ -146,8 +148,8 @@ impl InternedSymbols {
     }
 
     pub fn next_prod_id(&mut self) -> ProductionId {
-        let id = ProductionId(self.prod_id_count);
-        self.prod_id_count += 1;
+        let id = ProductionId(self.productions.len() as u16);
+        self.productions.push(None);
         id
     }
 
@@ -157,7 +159,8 @@ impl InternedSymbols {
             kind: SymbolKind::Nonterminal { productions, .. }, ..
         } = &mut self.nonterminals[index] else { unreachable!() };
 
-        productions.push(production.id);
-        self.productions.insert(production.id, production);
+        let id = production.id;
+        productions.push(id);
+        self.productions[id.0 as usize] = Some(production);
     }
 }

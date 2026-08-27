@@ -1,208 +1,63 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::hash::{DefaultHasher, Hasher, Hash};
-use std::io;
+use std::{fs, io};
 
+use crate::bitset::Bitset;
+use crate::lr::{LOOKAHEAD_SET_SIZE, LRContext, LookaheadSet, Lr1Item};
 use crate::symbols::{EOF_ID, InternedSymbols, ProductionId, Symbol, SymbolId, SymbolKind};
 use crate::table::{ParseTable, StateId};
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
-pub struct LookaheadSet(pub Box<[u64]>);
-
-impl LookaheadSet {
-    pub fn size(amount: usize) -> usize {
-        if amount % 64 != 0 { (amount / 64) + 1 } else { amount / 64 }
-    }
-
-    fn new(amount: usize) -> Self {
-        LookaheadSet(vec![0; Self::size(amount)].into_boxed_slice())
-    }
-
-    fn add(&mut self, symbol_id: SymbolId) {
-        let index = symbol_id.0 as usize / 64;
-        let remainder = symbol_id.0 as usize % 64;
-        self.0[index] |= 1 << remainder;
-    }
-
-    fn inplace_union(&mut self, other: &LookaheadSet) -> bool {
-        let mut changed = false;
-        assert_eq!(self.0.len(), other.0.len());
-
-        for idx in 0..self.0.len() {
-            let combined = self.0[idx] | other.0[idx];
-            if self.0[idx] != combined {
-                changed = true;
-                self.0[idx] = combined;
-            }
-        }
-        changed
-    }
-}
-
-pub struct LookaheadIterator<T> {
-    iterator: T,
-    current: u64,
-    idx: u16,
-}
-
-impl<'a, T: Iterator<Item = &'a u64>> Iterator for LookaheadIterator<T> {
-    type Item = SymbolId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.current == 0 {
-            self.current = *self.iterator.next()?;
-            self.idx += 1;
-        }
-
-        let lowest_bit = self.current.trailing_zeros();
-        self.current &= self.current - 1;
-        Some(SymbolId((self.idx - 1) * 64 + lowest_bit as u16))
-    }
-}
-
-impl<'a> IntoIterator for &'a LookaheadSet {
-    type Item = SymbolId;
-    type IntoIter = LookaheadIterator<std::slice::Iter<'a, u64>>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        LookaheadIterator { iterator: self.0.iter(), current: 0, idx: 0 }
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct ParserItem(pub ProductionId, pub usize);
-
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct InternedParserItem(pub u32);
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
-pub struct CanonicalCollection(pub Box<[InternedParserItem]>, pub Box<[LookaheadSet]>);
-
-impl CanonicalCollection {
-    pub fn zip(&self) -> impl Iterator<Item = (InternedParserItem, &LookaheadSet)> {
-        self.0.iter().map(|&item| item).zip(self.1.iter())
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct InternedCanonicalCollection(pub u16);
-
-impl From<InternedCanonicalCollection> for StateId {
-    fn from(value: InternedCanonicalCollection) -> Self {
-        StateId(value.0)
-    }
-}
-
-#[derive(Default)]
-pub struct GeneratorInterner {
-    pub items: Vec<ParserItem>,
-    pub item_lookup: HashMap<u64, Vec<usize>>,
-    pub collections: Vec<CanonicalCollection>,
-    pub collection_lookup: HashMap<u64, Vec<usize>>,
-}
-
-impl GeneratorInterner {
-    pub fn new() -> Self {
-        GeneratorInterner {
-            items: Vec::new(),
-            item_lookup: HashMap::new(),
-            collections: Vec::new(),
-            collection_lookup: HashMap::new(),
-        }
-    }
-
-    pub fn intern_item(&mut self, production_id: ProductionId, position: usize) -> InternedParserItem {
-        let item = ParserItem(production_id, position);
-
-        let mut hasher = DefaultHasher::new();
-        item.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        if let Some(bucket) = self.item_lookup.get(&hash) {
-            for &idx in bucket {
-                if self.items[idx] == item {
-                    return InternedParserItem(idx as u32);
-                }
-            }
-        }
-
-        let length = self.items.len();
-        self.items.push(item);
-
-        self.item_lookup.entry(hash).or_default().push(length);
-        InternedParserItem(length as u32)
-    }
-
-    pub fn intern_collection(&mut self, collection: CanonicalCollection) -> InternedCanonicalCollection {
-        let mut hasher = DefaultHasher::new();
-        collection.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        if let Some(bucket) = self.collection_lookup.get(&hash) {
-            for &idx in bucket {
-                if self.collections[idx] == collection {
-                    return InternedCanonicalCollection(idx as u16);
-                }
-            }
-        }
-
-        let length = self.collections.len();
-        self.collections.push(collection);
-
-        self.collection_lookup.entry(hash).or_default().push(length);
-        InternedCanonicalCollection(length as u16)
-    }
-}
-
-pub struct ParserState {
-    pub items: Vec<InternedParserItem>,
-    pub lookahead: HashMap<InternedParserItem, LookaheadSet>,
-}
-
-pub struct GeneratorContext<'a> {
+pub struct ComputationEngine<'a> {
     interned_symbols: &'a InternedSymbols,
+    context: LRContext,
     epsilon_nonterminals: HashSet<SymbolId>,
     first_sets: Vec<LookaheadSet>,
-    zero_items: Vec<Vec<InternedParserItem>>,
-    interner: GeneratorInterner,
-    precomputed_gotos: HashMap<(InternedCanonicalCollection, SymbolId), InternedCanonicalCollection>,
-    transitions: HashMap<(InternedCanonicalCollection, SymbolId), InternedCanonicalCollection>,
+
+    pending_gotos: HashMap<SymbolId, Vec<Lr1Item>>,
+
+    closure_lookaheads: Vec<LookaheadSet>,
+    closure_bitset: Bitset<Vec<u64>>,
+    closure_worklist: Vec<usize>,
 }
 
-impl<'a> GeneratorContext<'a> {
+impl<'a> ComputationEngine<'a> {
     pub fn new(interned_symbols: &'a InternedSymbols) -> Self {
         let first_sets: Vec<LookaheadSet> = (0..interned_symbols.nonterminals.len())
-            .map(|_| LookaheadSet::new(interned_symbols.terminals.len()))
+            .map(|_| Bitset([0; LOOKAHEAD_SET_SIZE]))
             .collect();
 
-        GeneratorContext {
+        let context = LRContext::new(interned_symbols);
+
+        let items = context.item_offsets[context.item_offsets.len() - 1];
+        ComputationEngine {
+            closure_bitset: Bitset::new(items),
+            context: context,
             interned_symbols,
             epsilon_nonterminals: HashSet::new(),
             first_sets: first_sets,
-            zero_items: Vec::with_capacity(interned_symbols.nonterminals.len()),
-            interner: GeneratorInterner::new(),
-            precomputed_gotos: HashMap::new(),
-            transitions: HashMap::new(),
+            pending_gotos: HashMap::new(),
+            closure_lookaheads: vec![Bitset([0; LOOKAHEAD_SET_SIZE]); items],
+            closure_worklist: Vec::new(),
         }
     }
 
-    pub fn dump_collection<T: io::Write>(&self, writer: &mut T, interned_collection: InternedCanonicalCollection) -> io::Result<()> {
-        write!(writer, "<parser state dump {}>\n", interned_collection.0)?;
+    pub fn dump_items<T: io::Write>(&self, writer: &mut T, state_id: StateId, items: &[Lr1Item]) -> io::Result<()> {
+        write!(writer, "<parser items dump #{}>\n", state_id.0)?;
 
-        for (i, (interned_item, lookahead)) in self.interner.collections[interned_collection.0 as usize].zip().enumerate() {
-            let ParserItem(production_id, position) = self.interner.items[interned_item.0 as usize];
+        for (i, item) in items.iter().enumerate() {
+            let (production_id, position) = self.context.item_core(item.index);
             let production = self.interned_symbols.production(production_id);
             let lhs = self.interned_symbols.nonterminal(production.lhs_id);
 
-            let names = lookahead.into_iter()
-                .map(|sym| self.interned_symbols.symbol(sym).name.clone())
+            let names = item.lookahead.into_iter()
+                .map(|sym| self.interned_symbols.symbol(SymbolId(sym as u16)).name.clone())
                 .collect::<Vec<String>>()
                 .join(", ");
 
             write!(writer, "    ({}., pos={}, lookahead={{{}}}): {} ->", i, position, names, lhs.name)?;
 
             for (j, &symbol_id) in production.rhs.iter().enumerate() {
-                if j == position {
+                if j == position as usize {
                     write!(writer, " *")?;
                 }
 
@@ -216,7 +71,7 @@ impl<'a> GeneratorContext<'a> {
                 }
             }
 
-            if production.rhs.len() <= position {
+            if production.rhs.len() <= position as usize {
                 write!(writer, " *")?;
             }
             write!(writer, "\n")?;
@@ -225,7 +80,7 @@ impl<'a> GeneratorContext<'a> {
     }
 
     fn compute_epsilon_nonterminals(&mut self) {
-        for production in self.interned_symbols.productions.values() {
+        for production in self.interned_symbols.iter_productions() {
             if production.rhs.len() == 0 {
                 self.epsilon_nonterminals.insert(production.lhs_id);
             }
@@ -235,7 +90,7 @@ impl<'a> GeneratorContext<'a> {
         while changed {
             changed = false;
 
-            for production in self.interned_symbols.productions.values() {
+            for production in self.interned_symbols.iter_productions() {
                 if !self.epsilon_nonterminals.contains(&production.lhs_id) && production.rhs.iter().all(
                     |sym| self.epsilon_nonterminals.contains(sym)
                 ) {
@@ -247,10 +102,10 @@ impl<'a> GeneratorContext<'a> {
     }
 
     pub fn compute_first_sets(&mut self) {
-        for production in self.interned_symbols.productions.values() {
+        for production in self.interned_symbols.iter_productions() {
             for &symbol_id in &production.rhs {
                 if matches!(self.interned_symbols.symbol(symbol_id), Symbol { kind: SymbolKind::Terminal { .. }, .. }) {
-                    self.first_sets[self.interned_symbols.nonterminal_index(production.lhs_id)].add(symbol_id);
+                    self.first_sets[self.interned_symbols.nonterminal_index(production.lhs_id)].add(symbol_id.0 as usize);
                 }
 
                 if !self.epsilon_nonterminals.contains(&symbol_id) {
@@ -263,7 +118,7 @@ impl<'a> GeneratorContext<'a> {
         while changed {
             changed = false;
 
-            for production in self.interned_symbols.productions.values() {
+            for production in self.interned_symbols.iter_productions() {
                 for &symbol_id in &production.rhs {
                     if matches!(self.interned_symbols.symbol(symbol_id), Symbol { kind: SymbolKind::Nonterminal { .. }, .. }) {
                         let lhs_index = self.interned_symbols.nonterminal_index(production.lhs_id);
@@ -284,27 +139,12 @@ impl<'a> GeneratorContext<'a> {
         }
     }
 
-    pub fn compute_zero_items(&mut self) {
-        for nonterminal in &self.interned_symbols.nonterminals {
-            let Symbol {
-                kind: SymbolKind::Nonterminal { productions, .. }, ..
-            } = nonterminal else { unreachable!() };
-
-            let mut items = Vec::with_capacity(productions.len());
-            for &production_id in productions {
-                items.push(self.interner.intern_item(production_id, 0));
-            }
-
-            self.zero_items.push(items);
-        }
-    }
-
     fn first_set<T: Iterator<Item = &'a SymbolId>>(&self, symbols: T) -> LookaheadSet {
-        let mut result = LookaheadSet::new(self.interned_symbols.terminals.len());
+        let mut result = Bitset([0; LOOKAHEAD_SET_SIZE]);
         for &symbol_id in symbols {
             match self.interned_symbols.symbol(symbol_id) {
                 Symbol { kind: SymbolKind::Terminal { .. }, .. } => {
-                    result.add(symbol_id);
+                    result.add(symbol_id.0 as usize);
                 }
                 Symbol { kind: SymbolKind::Nonterminal { .. }, .. } => {
                     result.inplace_union(&self.first_sets[self.interned_symbols.nonterminal_index(symbol_id)]);
@@ -317,159 +157,139 @@ impl<'a> GeneratorContext<'a> {
         result
     }
 
-    pub fn canonicalize_state(&mut self, mut state: ParserState) -> InternedCanonicalCollection {
-        state.items.sort();
-    
-        let lookahead = state.items.iter()
-            .map(|item| {
-                state.lookahead.remove(item).expect("Item has no lookahead")
-            })
-            .collect::<Vec<LookaheadSet>>();
+    pub fn compute_closure(&mut self, items: &[Lr1Item]) -> Vec<Lr1Item> {
+        self.closure_worklist.clear();
+        self.closure_bitset.clear();
+        for lookahead in &mut self.closure_lookaheads {
+            lookahead.clear();
+        }
 
-        let collection = CanonicalCollection(state.items.into_boxed_slice(), lookahead.into_boxed_slice());
-        self.interner.intern_collection(collection)
-    }
+        for item in items {
+            self.closure_lookaheads.insert(item.index, item.lookahead.clone());
+            self.closure_worklist.push(item.index);
+            self.closure_bitset.add(item.index);
+        }
 
-    pub fn compute_closure(&mut self, mut state: ParserState) -> InternedCanonicalCollection {
-        let mut worklist = Vec::from(state.items.clone());
+        let mut worklist_index = 0;
+        while worklist_index < self.closure_worklist.len() {
+            let item_index = self.closure_worklist[worklist_index];
+            worklist_index += 1;
 
-        while let Some(interned_item) = worklist.pop() {
-            let ParserItem(production_id, position) = self.interner.items[interned_item.0 as usize];
+            let (production_id, position) = self.context.item_core(item_index);
+            
             let production = self.interned_symbols.production(production_id);
-            if production.rhs.len() <= position {
+            if production.rhs.len() <= position as usize {
                 continue;
             }
-
-            let current_symbol = self.interned_symbols.symbol(production.rhs[position]);
-            if !matches!(current_symbol, Symbol { kind: SymbolKind::Nonterminal { .. }, .. }) {
+            
+            let current_symbol = self.interned_symbols.symbol(production.rhs[position as usize]);
+            let Symbol { kind: SymbolKind::Nonterminal { productions, .. }, .. } = current_symbol else {
                 continue;
-            }
+            };
 
-            let lookahead = &state.lookahead[&interned_item];
-            let trailing_symbols = &production.rhs[position + 1..];
+            let lookahead = &self.closure_lookaheads[item_index];
+            let trailing_symbols = &production.rhs[(position as usize) + 1..];
             let mut next_lookahead = self.first_set(trailing_symbols.iter());
 
             if trailing_symbols.iter().all(|id| self.epsilon_nonterminals.contains(id)) {
                 next_lookahead.inplace_union(lookahead);
             }
 
-            for &next_interned_item in &self.zero_items[self.interned_symbols.nonterminal_index(current_symbol.id)] {
-                match state.lookahead.entry(next_interned_item) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(next_lookahead.clone());
-                        state.items.push(next_interned_item);
-                        worklist.push(next_interned_item);
-                    }
-                    Entry::Occupied(mut entry) => {
-                        if entry.get_mut().inplace_union(&next_lookahead) {
-                            worklist.push(next_interned_item);
-                        }
+            for &inner_production_id in productions {
+                let inner_item_index = self.context.item_index(inner_production_id, 0);
+                let was_added = self.closure_bitset.add(inner_item_index);
+                if was_added {
+                    self.closure_worklist.push(inner_item_index);
+                }
+
+                let existing_lookahead = &mut self.closure_lookaheads[inner_item_index];
+                if existing_lookahead.inplace_union(&next_lookahead) {
+                    if !was_added {
+                        self.closure_worklist.push(inner_item_index);
                     }
                 }
             }
         }
 
-        self.canonicalize_state(state)
+        let mut closure_items = Vec::with_capacity(self.closure_worklist.len());
+        for index in &self.closure_bitset {
+            closure_items.push(Lr1Item { index, lookahead: self.closure_lookaheads[index] })
+        }
+
+        closure_items.sort_by_key(|item| self.context.item_core(item.index));
+        closure_items
     }
 
     pub fn compute_goto(
         &mut self,
-        interned_collection: InternedCanonicalCollection,
-        symbol_id: SymbolId,
-    ) -> InternedCanonicalCollection {
-        let mut state = ParserState { items: Vec::new(), lookahead: HashMap::new() };
-
-        let collections = std::mem::take(&mut self.interner.collections);
-        let collection  = &collections[interned_collection.0 as usize];
-    
-        for (item, lookahead) in collection.zip() {
-            let ParserItem(production_id, position) = self.interner.items[item.0 as usize];
+        items: &[Lr1Item],
+    ) {
+        for item in items {
+            let (production_id, position) = self.context.item_core(item.index);
             let production = self.interned_symbols.production(production_id);
 
-            if production.rhs.len() > position && production.rhs[position] == symbol_id {
-                let interned_item = self.interner.intern_item(production_id, position + 1);
-                state.items.push(interned_item);
-                state.lookahead.insert(interned_item, lookahead.clone());
+            if production.rhs.len() > position as usize {
+                let item = Lr1Item {
+                    index: self.context.item_index(production_id, position + 1),
+                    lookahead: item.lookahead.clone(),
+                };
+
+                let symbol_id = production.rhs[position as usize];
+                self.pending_gotos.entry(symbol_id)
+                    .or_default()
+                    .push(item);
             }
         }
-
-        self.interner.collections = collections;
-        let next_interned_collection = self.compute_closure(state);
-        self.precomputed_gotos.insert((interned_collection, symbol_id), next_interned_collection);
-        next_interned_collection
     }
 
-    pub fn compute_canonical_collection<T: Iterator<Item = ProductionId>>(&mut self, production_ids: T) {
+    pub fn compute_canonical_collection<T: Iterator<Item = ProductionId>>(
+        &mut self,
+        production_ids: T,
+    ) -> HashMap<(StateId, SymbolId), StateId> {
         let mut entrypoint_states = HashMap::new();
-        for production_id in production_ids {
-            let interned_item = self.interner.intern_item(production_id, 0);
-            let mut lookahead = LookaheadSet::new(self.interned_symbols.terminals.len());
-            lookahead.add(EOF_ID);
+        let mut worklist = Vec::new();
 
-            let entry_state = ParserState {
-                items: vec![interned_item],
-                lookahead: HashMap::from([(interned_item, lookahead)])
-            };
-            let interned_collection = self.compute_closure(entry_state);
-            entrypoint_states.insert(production_id, interned_collection);
+        for production_id in production_ids {
+            let item_index = self.context.item_index(production_id, 0);
+            let mut lookahead = Bitset([0; LOOKAHEAD_SET_SIZE]);
+            lookahead.add(EOF_ID.0 as usize);
+
+            let entry_item = Lr1Item { index: item_index, lookahead };
+
+            let items = vec![entry_item];
+            let (state_id, _) = self.context.canonicalize_state(items.clone());
+            entrypoint_states.insert(production_id, state_id);
+            worklist.push((state_id, items));
         }
         assert!(entrypoint_states.len() > 0);
 
-        let mut transitions = std::mem::take(&mut self.transitions);
-        let mut worklist: Vec<InternedCanonicalCollection> = (0..self.interner.collections.len())
-            .map(|n| InternedCanonicalCollection(n as u16))
-            .collect();
+        let mut transitions = HashMap::new();
 
-        while let Some(interned_collection) = worklist.pop() {
-            let mut buffer = Vec::new();
-            let mut pending_transitions = Vec::new();
+        //let mut fp = fs::File::create("./output.txt").unwrap();
+        while let Some((state_id, items)) = worklist.pop() {
+            //self.dump_items(&mut fp, state_id, &items);
+            let closure = self.compute_closure(&items);
+            //println!("**** AFTER CLOSUERE ****");
+            //self.dump_items(&mut fp, state_id, &closure);
 
-            let collection = &self.interner.collections[interned_collection.0 as usize];
-            for &interned_item in &collection.0 {
-                let ParserItem(production_id, position) = self.interner.items[interned_item.0 as usize];
-                let production = self.interned_symbols.production(production_id);
-                if production.rhs.len() <= position {
-                    continue;
-                }
+            self.compute_goto(&closure);
 
-                let current_symbol = production.rhs[position];
-                match self.precomputed_gotos.entry((interned_collection, current_symbol)) {
-                    Entry::Vacant(_) => {
-                        buffer.push(current_symbol);
-                    }
-                    Entry::Occupied(entry) => {
-                        pending_transitions.push((current_symbol, *entry.get()));
-                    }
-                }
-            }
+            for (symbol_id, inner_items) in self.pending_gotos.drain() {
+                let (next_state_id, was_added) = self.context.canonicalize_state(inner_items.clone());
+                transitions.insert((state_id, symbol_id), next_state_id);
 
-            for symbol_id in buffer {
-                let next_interned = self.compute_goto(interned_collection, symbol_id);
-                worklist.push(next_interned);
-                pending_transitions.push((symbol_id, next_interned));
-            }
-
-            for (symbol_id, next_interned) in pending_transitions {
-                match transitions.entry((interned_collection, symbol_id)) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(next_interned);
-                    }
-                    Entry::Occupied(entry) => {
-                        if *entry.get() != next_interned {
-                            panic!("Entries differ");
-                        }
-                    }
+                if was_added {
+                    worklist.push((next_state_id, inner_items));
                 }
             }
         }
     
-        self.transitions = transitions;
+        transitions
     }
 
     pub fn compute_table(&mut self) -> ParseTable<'a> {
         self.compute_epsilon_nonterminals();
         self.compute_first_sets();
-        self.compute_zero_items();
 
         let production_ids = self.interned_symbols.nonterminals.iter()
             .map(|sym| {
@@ -483,51 +303,38 @@ impl<'a> GeneratorContext<'a> {
             })
             .flatten();
 
-        self.compute_canonical_collection(production_ids);
-        let mut table = ParseTable::new(&self.interned_symbols, self.interner.collections.len());
+        let transitions = self.compute_canonical_collection(production_ids);
+        let mut table = ParseTable::new(&self.interned_symbols, self.context.kernels.len());
 
-        let interned_collections = (0..self.interner.collections.len())
-            .map(|n| InternedCanonicalCollection(n as u16));
+        for ((from_state, symbol_id), to_state) in transitions {
+            match self.interned_symbols.symbol(symbol_id) {
+                Symbol { kind: SymbolKind::Terminal { .. }, .. } => {
+                    table.add_shift(from_state, symbol_id, to_state);
+                }
+                Symbol { kind: SymbolKind::Nonterminal { .. }, .. } => {
+                    table.add_goto(from_state, symbol_id, to_state);
+                }
+            }
+        }
 
-        for interned_collection in interned_collections {
-            let mut nonterminals = HashSet::new();
-
-            let collection = &self.interner.collections[interned_collection.0 as usize];
-            for (interned_item, lookahead) in collection.zip() {
-                let ParserItem(production_id, position) = self.interner.items[interned_item.0 as usize];
+        let state_ids: Vec<StateId> = self.context.kernel_ids.values().copied().collect();
+        for state_id in state_ids {
+            let items = &self.context.kernels[state_id.0 as usize];
+            for item in items {
+                let (production_id, position) = self.context.item_core(item.index);
                 let production = self.interned_symbols.production(production_id);
 
-                if production.rhs.len() <= position {
+                if production.rhs.len() <= position as usize {
                     let lhs = self.interned_symbols.nonterminal(production.lhs_id);
                     if let Symbol { kind: SymbolKind::Nonterminal { entrypoint: true, .. }, .. } = lhs {
-                        table.add_accept(interned_collection.into(), production_id);
+                        table.add_accept(state_id, production_id);
                     }
                     else {
-                        for lookahead_symbol in lookahead {
-                            table.add_reduce(interned_collection.into(), lookahead_symbol, production_id);
+                        for lookahead_number in &item.lookahead {
+                            let lookahead_symbol = SymbolId(lookahead_number as u16);
+                            table.add_reduce(state_id, lookahead_symbol, production_id);
                         }
                     }
-                }
-                else {
-                    let symbol_id = production.rhs[position];
-                    if nonterminals.contains(&symbol_id) {
-                        continue;
-                    }
-
-                    let Some(&next_interned_collection) = self.transitions.get(&(interned_collection, symbol_id)) else {
-                        continue
-                    };
-
-                    match self.interned_symbols.symbol(symbol_id) {
-                        Symbol { kind: SymbolKind::Terminal { .. }, .. } => {
-                            table.add_shift(interned_collection.into(), symbol_id, next_interned_collection.into());
-                        }
-                        Symbol { kind: SymbolKind::Nonterminal { .. }, .. } => {
-                            nonterminals.insert(symbol_id);
-                            table.add_goto(interned_collection.into(), symbol_id, next_interned_collection.into());
-                        }
-                    }
-
                 }
             }
         }
