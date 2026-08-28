@@ -242,7 +242,7 @@ impl<'a> ComputationEngine<'a> {
         self.compute_first_sets();
 
         let production_ids = self.interned_symbols.nonterminals.iter()
-            .map(|sym| {
+            .filter_map(|sym| {
                 if let Symbol { kind: SymbolKind::Nonterminal { entrypoint: true, productions }, ..} = sym {
                     assert_eq!(productions.len(), 1);
                     Some(productions[0])
@@ -250,8 +250,7 @@ impl<'a> ComputationEngine<'a> {
                 else {
                     None
                 }
-            })
-            .flatten();
+            });
 
         let mut entrypoint_states = HashMap::new();
         let mut worklist = Vec::new();
