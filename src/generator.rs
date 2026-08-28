@@ -2,7 +2,7 @@ use crate::lr::CanonicalCollection;
 use crate::symbols::{InternedSymbols, Symbol, SymbolId, SymbolKind};
 use crate::table::{ParseTable, StateId};
 
-pub struct TableGenerator<'a>{
+pub struct TableGenerator<'a> {
     interned_symbols: &'a InternedSymbols,
     canonical_collection: CanonicalCollection,
 }

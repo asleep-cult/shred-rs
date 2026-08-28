@@ -25,6 +25,14 @@ pub struct Symbol {
 }
 
 impl Symbol {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Symbol { kind: SymbolKind::Terminal { .. }, .. })
+    }
+
+    pub fn is_nonterminal(&self) -> bool {
+        matches!(self, Symbol { kind: SymbolKind::Nonterminal { .. }, .. })
+    }
+
     pub fn written_as(&self) -> String {
         match self {
             Symbol { kind: SymbolKind::Terminal { value: Some(value) }, .. } => format!("\"{}\"", value),

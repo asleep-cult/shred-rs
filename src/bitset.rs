@@ -76,7 +76,12 @@ impl<T: BitsetData> Bitset<T> {
         // Return false if it was already there
         let word_index = index as usize / 64;
         let remainder = index as usize % 64;
-        debug_assert!(word_index < self.0.word_len());
+        debug_assert!(
+            word_index < self.0.word_len(),
+            "Word index {} out of bounds for bitset with word length {}",
+            word_index,
+            self.0.word_len(),
+        );
 
         let word = self.0.get_word(word_index);
         let result = word | 1 << remainder;

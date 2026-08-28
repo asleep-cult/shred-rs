@@ -1,16 +1,15 @@
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
-use std::{fs, io};
+use std::collections::{HashMap};
+use std::io;
 
 use crate::bitset::Bitset;
 use crate::lr::{CanonicalCollection, LOOKAHEAD_SET_SIZE, LRContext, LookaheadSet, Lr1Item};
-use crate::symbols::{EOF_ID, InternedSymbols, ProductionId, Symbol, SymbolId, SymbolKind};
-use crate::table::{ParseTable, StateId};
+use crate::symbols::{EOF_ID, InternedSymbols, Symbol, SymbolId, SymbolKind};
+use crate::table::StateId;
 
 pub struct ComputationEngine<'a> {
     interned_symbols: &'a InternedSymbols,
     context: LRContext,
-    epsilon_nonterminals: HashSet<SymbolId>,
+    epsilon_nonterminals: Bitset<Vec<u64>>,
     first_sets: Vec<LookaheadSet>,
 
     pending_gotos: HashMap<SymbolId, Vec<Lr1Item>>,
@@ -23,22 +22,18 @@ pub struct ComputationEngine<'a> {
 
 impl<'a> ComputationEngine<'a> {
     pub fn new(interned_symbols: &'a InternedSymbols) -> Self {
-        let first_sets: Vec<LookaheadSet> = (0..interned_symbols.nonterminals.len())
-            .map(|_| Bitset([0; LOOKAHEAD_SET_SIZE]))
-            .collect();
-
         let context = LRContext::new(interned_symbols);
 
         let items = context.item_offsets[context.item_offsets.len() - 1];
         ComputationEngine {
-            closure_bitset: Bitset::new(items),
+            closure_bitset: <Bitset<Vec<u64>>>::new(items),
             context: context,
             interned_symbols,
-            epsilon_nonterminals: HashSet::new(),
-            first_sets: first_sets,
+            epsilon_nonterminals: <Bitset<Vec<u64>>>::new(interned_symbols.nonterminals.len()),
+            first_sets: vec![LookaheadSet::new(); interned_symbols.nonterminals.len()],
             pending_gotos: HashMap::new(),
             pending_epsilons: Vec::new(),
-            closure_lookaheads: vec![Bitset([0; LOOKAHEAD_SET_SIZE]); items],
+            closure_lookaheads: vec![LookaheadSet::new(); items],
             closure_worklist: Vec::new(),
         }
     }
@@ -63,14 +58,7 @@ impl<'a> ComputationEngine<'a> {
                     write!(writer, " *")?;
                 }
 
-                match self.interned_symbols.symbol(symbol_id) {
-                    Symbol { kind: SymbolKind::Terminal { value: Some(value) }, .. } => {
-                        write!(writer, " {}", value)?;
-                    }
-                    Symbol { name, .. } => {
-                        write!(writer, " {}", name)?;
-                    }
-                }
+                write!(writer, " {}", self.interned_symbols.symbol(symbol_id).written_as())?;
             }
 
             if production.rhs.len() <= position as usize {
@@ -84,7 +72,8 @@ impl<'a> ComputationEngine<'a> {
     fn compute_epsilon_nonterminals(&mut self) {
         for production in self.interned_symbols.iter_productions() {
             if production.rhs.len() == 0 {
-                self.epsilon_nonterminals.insert(production.lhs_id);
+                let index = self.interned_symbols.nonterminal_index(production.lhs_id);
+                self.epsilon_nonterminals.add(index);
             }
         }
 
@@ -93,24 +82,30 @@ impl<'a> ComputationEngine<'a> {
             changed = false;
 
             for production in self.interned_symbols.iter_productions() {
-                if !self.epsilon_nonterminals.contains(&production.lhs_id) && production.rhs.iter().all(
-                    |sym| self.epsilon_nonterminals.contains(sym)
-                ) {
-                    self.epsilon_nonterminals.insert(production.lhs_id);
+                if !self.has_epsilon_nonterminal(production.lhs_id)
+                    && production.rhs.iter().all(|&sym| self.has_epsilon_nonterminal(sym))
+                {
+                    let index = self.interned_symbols.nonterminal_index(production.lhs_id);
+                    self.epsilon_nonterminals.add(index);
                     changed = true;
                 }
             }
         }
     }
 
+    pub fn has_epsilon_nonterminal(&self, symbol_id: SymbolId) -> bool {
+        self.interned_symbols.symbol(symbol_id).is_nonterminal()
+        && self.epsilon_nonterminals.has(self.interned_symbols.nonterminal_index(symbol_id))
+    }
+
     pub fn compute_first_sets(&mut self) {
         for production in self.interned_symbols.iter_productions() {
             for &symbol_id in &production.rhs {
-                if matches!(self.interned_symbols.symbol(symbol_id), Symbol { kind: SymbolKind::Terminal { .. }, .. }) {
+                if self.interned_symbols.symbol(symbol_id).is_terminal() {
                     self.first_sets[self.interned_symbols.nonterminal_index(production.lhs_id)].add(symbol_id.0 as usize);
                 }
 
-                if !self.epsilon_nonterminals.contains(&symbol_id) {
+                if !self.has_epsilon_nonterminal(symbol_id) {
                     break;
                 }
             }
@@ -122,7 +117,7 @@ impl<'a> ComputationEngine<'a> {
 
             for production in self.interned_symbols.iter_productions() {
                 for &symbol_id in &production.rhs {
-                    if matches!(self.interned_symbols.symbol(symbol_id), Symbol { kind: SymbolKind::Nonterminal { .. }, .. }) {
+                    if self.interned_symbols.symbol(symbol_id).is_nonterminal() {
                         let lhs_index = self.interned_symbols.nonterminal_index(production.lhs_id);
                         let rhs_index = self.interned_symbols.nonterminal_index(symbol_id);
 
@@ -133,7 +128,7 @@ impl<'a> ComputationEngine<'a> {
                             }
                         }
                     }
-                    if !self.epsilon_nonterminals.contains(&symbol_id) {
+                    if !self.has_epsilon_nonterminal(symbol_id) {
                         break;
                     }
                 }
@@ -144,15 +139,13 @@ impl<'a> ComputationEngine<'a> {
     fn first_set<T: Iterator<Item = &'a SymbolId>>(&self, symbols: T) -> LookaheadSet {
         let mut result = Bitset([0; LOOKAHEAD_SET_SIZE]);
         for &symbol_id in symbols {
-            match self.interned_symbols.symbol(symbol_id) {
-                Symbol { kind: SymbolKind::Terminal { .. }, .. } => {
-                    result.add(symbol_id.0 as usize);
-                }
-                Symbol { kind: SymbolKind::Nonterminal { .. }, .. } => {
-                    result.inplace_union(&self.first_sets[self.interned_symbols.nonterminal_index(symbol_id)]);
-                }
+            if self.interned_symbols.symbol(symbol_id).is_nonterminal() {
+                result.inplace_union(&self.first_sets[self.interned_symbols.nonterminal_index(symbol_id)]);
             }
-            if !self.epsilon_nonterminals.contains(&symbol_id) {
+            else {
+                result.add(symbol_id.0 as usize);
+            }
+            if !self.has_epsilon_nonterminal(symbol_id) {
                 break;
             }
         }
@@ -193,7 +186,7 @@ impl<'a> ComputationEngine<'a> {
             let trailing_symbols = &production.rhs[(position as usize) + 1..];
             let mut next_lookahead = self.first_set(trailing_symbols.iter());
 
-            if trailing_symbols.iter().all(|id| self.epsilon_nonterminals.contains(id)) {
+            if trailing_symbols.iter().all(|&sym| self.has_epsilon_nonterminal(sym)) {
                 next_lookahead.inplace_union(lookahead);
             }
 
@@ -222,10 +215,7 @@ impl<'a> ComputationEngine<'a> {
         closure_items
     }
 
-    pub fn compute_goto(
-        &mut self,
-        items: &[Lr1Item],
-    ) {
+    pub fn compute_goto(&mut self, items: &[Lr1Item]) {
         for item in items {
             let (production_id, position) = self.context.item_core(item.index);
             let production = self.interned_symbols.production(production_id);
@@ -283,12 +273,12 @@ impl<'a> ComputationEngine<'a> {
         let mut transitions = HashMap::new();
         let mut epsilon_transitions = Vec::new();
 
-        let mut fp = fs::File::create("./output.txt").unwrap();
+        //let mut fp = fs::File::create("./output.txt").unwrap();
         while let Some((state_id, items)) = worklist.pop() {
             //self.dump_items(&mut fp, state_id, &items);
             let closure = self.compute_closure(&items);
             self.compute_goto(&closure);
-            self.dump_items(&mut fp, state_id, &closure);
+            //self.dump_items(&mut fp, state_id, &closure);
 
             for (symbol_id, inner_items) in self.pending_gotos.drain() {
                 let (next_state_id, was_added) = self.context.canonicalize_state(inner_items.clone());

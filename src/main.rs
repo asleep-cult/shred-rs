@@ -30,7 +30,7 @@ fn main() {
 
     let mut generator = generator::TableGenerator::new(&interned_symbols, collection);
     let table = generator.generate_table();
-    let mut fp = std::fs::File::create("./table.out").unwrap();
+    //let mut fp = std::fs::File::create("./table.out").unwrap();
     println!("done");
-    table.dump_table(&mut fp).unwrap();
+    //table.dump_table(&mut fp).unwrap();
 }

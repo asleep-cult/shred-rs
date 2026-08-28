@@ -9,6 +9,12 @@ use crate::table::StateId;
 pub const LOOKAHEAD_SET_SIZE: usize = 2;
 pub type LookaheadSet = Bitset<[u64; LOOKAHEAD_SET_SIZE]>;
 
+impl LookaheadSet {
+    pub fn new() -> Self {
+        Bitset([0; LOOKAHEAD_SET_SIZE])
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Lr1Item {
     pub index: usize,
