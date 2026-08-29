@@ -4,5 +4,5 @@ members = [
     "crates/python-bindings",
     "crates/shred-automaton",
     "crates/shred-core",
-    "crates/shred-generator",
+    "crates/shred-generator", "tester",
 ]

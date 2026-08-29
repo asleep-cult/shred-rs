@@ -3,7 +3,12 @@ name = "python-bindings"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
-path = "src/lib.rs"
+name = "python_bindings"
+crate-type = ["cdylib"]
+
+[dependencies]
+shred-automaton = { path = "../shred-automaton" }
+shred-generator = { path = "../shred-generator" }
+pyo3 = "0.29.0"

@@ -2,7 +2,7 @@ use core::fmt;
 use std::collections::HashMap;
 use std::fmt::Write;
 
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct SymbolId(pub u16);
 
 pub const EOF_ID: SymbolId = SymbolId(0);

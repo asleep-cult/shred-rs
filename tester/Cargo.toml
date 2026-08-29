@@ -1,0 +1,9 @@
+[package]
+name = "tester"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+shred-core = { path = "../crates/shred-core" }
+shred-automaton = { path = "../crates/shred-automaton" }
+shred-generator = { path = "../crates/shred-generator" }

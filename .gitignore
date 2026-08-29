@@ -4,3 +4,5 @@ main.pdb
 grammar_test
 expected.txt
 gram
+.env
+.github

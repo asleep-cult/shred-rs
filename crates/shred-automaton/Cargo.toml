@@ -7,4 +7,4 @@ edition = "2024"
 shred-core = { path = "../shred-core" }
 
 [lib]
-path = "lib.rs"
+path = "src/lib.rs"
