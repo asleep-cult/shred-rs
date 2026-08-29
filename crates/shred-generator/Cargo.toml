@@ -1,0 +1,10 @@
+[package]
+name = "shred-generator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustc-hash = "2.1.3"
+
+[lib]
+path = "lib.rs"
