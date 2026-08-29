@@ -1,4 +1,9 @@
-use std::{iter::Copied};
+use std::iter::Copied;
+
+
+pub const LOOKAHEAD_SET_SIZE: usize = 2;
+pub type LookaheadSet = Bitset<[u64; LOOKAHEAD_SET_SIZE]>;
+
 
 pub trait BitsetData {
     type Iter<'a>: Iterator<Item = u64> where Self: 'a;
@@ -122,6 +127,13 @@ impl<T: BitsetData> Bitset<T> {
         self.0.clear_words();
     }
 }
+
+impl LookaheadSet {
+    pub fn new() -> Self {
+        Bitset([0; LOOKAHEAD_SET_SIZE])
+    }
+}
+
 
 pub struct BitsetIterator<T> {
     iterator: T,

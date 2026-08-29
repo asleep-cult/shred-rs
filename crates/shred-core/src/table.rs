@@ -1,5 +1,3 @@
-use std::io;
-
 use crate::symbols::{InternedSymbols, ProductionId, Symbol, SymbolId, EOF_ID};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -80,20 +78,20 @@ pub struct GotoConflict {
     pub new_entry: StateId,
 }
 
-pub struct ParseTable<'a> {
-    pub interned_symbols: &'a InternedSymbols,
-    number_of_states: usize,
+pub struct ParseTable {
+    pub interned_symbols: InternedSymbols,
+    pub number_of_states: usize,
     actions: Box<[u16]>,
     gotos: Box<[u16]>,
 }
 
-impl<'a> ParseTable<'a> {
-    pub fn new(interned_symbols: &'a InternedSymbols, number_of_states: usize) -> Self {
+impl<'a> ParseTable {
+    pub fn new(interned_symbols: InternedSymbols, number_of_states: usize) -> Self {
         ParseTable {
-            interned_symbols,
             number_of_states,
             actions: vec![0; number_of_states * interned_symbols.terminals.len()].into_boxed_slice(),
             gotos: vec![0; number_of_states * interned_symbols.nonterminals.len()].into_boxed_slice(),
+            interned_symbols,
         }
     }
 
@@ -238,44 +236,5 @@ impl<'a> ParseTable<'a> {
             .enumerate()
             .filter(|&(_, n)| n != UNSET_GOTO)
             .map(|(idx, n)| (&self.interned_symbols.nonterminals[idx], StateId(n - 1)))
-    }
-
-    pub fn dump_table<T: io::Write>(&self, writer: &mut T) -> io::Result<()> {
-        for idx in 0..self.number_of_states {
-            let state_id = StateId(idx as u16);
-            write!(writer, "<state #{}>", idx)?;
-
-            let actions: Vec<(&Symbol, ActionKind)> = self.action_map(state_id).collect();
-            write!(writer, "\n[ Actions: {} ]", actions.len())?;
-
-            for (symbol, action) in actions {
-                match action {
-                    ActionKind::Shift(StateId(state_id)) => {
-                        write!(writer, "\n    (for symbol {}) SHIFT -> state #{}", symbol.name, state_id)?;
-                    }
-                    ActionKind::Reduce(production_id) => {
-                        let production = self.interned_symbols.production(production_id);
-                        let lhs = self.interned_symbols.nonterminal(production.lhs_id);
-                        write!(writer, "\n    (for symbol {}) REDUCE [production: {}]", symbol.name, lhs.name)?;
-                    }
-                    ActionKind::Accept(production_id) => {
-                        let production = self.interned_symbols.production(production_id);
-                        let lhs = self.interned_symbols.nonterminal(production.lhs_id);
-                        write!(writer, "\n    (for symbol {}) ACCEPT [production: {}]", symbol.name, lhs.name)?;
-                    }
-                    ActionKind::Reject => { unreachable!() }
-                }
-            }
-
-            let gotos: Vec<(&Symbol, StateId)> = self.goto_map(state_id).collect();
-            write!(writer, "\n[ Gotos: {} ]", gotos.len())?;
-
-            for (symbol, next_state_id) in gotos {
-                write!(writer, "\n    (for symbol {}) -> state #{}", symbol.name, next_state_id.0)?;
-            }
-
-            write!(writer, "\n")?;
-        }
-        Ok(())
     }
 }

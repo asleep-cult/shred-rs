@@ -1,10 +1,9 @@
 [package]
-name = "shred-generator"
+name = "python-bindings"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-shred-core = { path = "../shred-core" }
 
 [lib]
 path = "src/lib.rs"

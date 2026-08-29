@@ -1,9 +1,9 @@
 use std::collections::{HashMap};
 
-use crate::bitset::Bitset;
-use crate::lr::{CanonicalCollection, LOOKAHEAD_SET_SIZE, LRContext, LookaheadSet, Lr1Item};
-use crate::symbols::{EOF_ID, InternedSymbols, Symbol, SymbolId, SymbolKind};
-use crate::diagnostics::DiagnosticInfo;
+use shred_core::bitset::{Bitset, LOOKAHEAD_SET_SIZE, LookaheadSet};
+use shred_core::lr::{CanonicalCollection, LRContext, Lr1Item};
+use shred_core::symbols::{EOF_ID, InternedSymbols, Symbol, SymbolId, SymbolKind};
+use shred_core::diagnostics::DiagnosticInfo;
 
 pub struct ComputationEngine<'a> {
     interned_symbols: &'a InternedSymbols,

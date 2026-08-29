@@ -1,13 +1,8 @@
-[package]
-name = "shred-rs"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-
-[profile.release]
-debug = true
-strip = false
-
-[build]
-rustflags = ["-C", "force-frame-pointers=y"]
+[workspace]
+resolver = "2"
+members = [
+    "crates/python-bindings",
+    "crates/shred-automaton",
+    "crates/shred-core",
+    "crates/shred-generator",
+]

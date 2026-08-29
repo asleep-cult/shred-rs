@@ -1,5 +1,5 @@
 use crate::ast::{RuleId, AstArena, RuleKind};
-use crate::symbols::{
+use shred_core::symbols::{
     DEFAULT_ACTION, InternedSymbols, NonterminalProduction, OPTION_ACTION, PREPEND_ACTION,
     SEQUENCE_ACTION, Symbol, SymbolId, SymbolKind
 };

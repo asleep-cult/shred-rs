@@ -10,6 +10,14 @@ pub const EOF_ID: SymbolId = SymbolId(0);
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct ProductionId(pub u16);
 
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct ActionId(pub u16);
+
+pub const DEFAULT_ACTION: ActionId = ActionId(0);
+pub const SEQUENCE_ACTION: ActionId = ActionId(1);
+pub const PREPEND_ACTION: ActionId = ActionId(2);
+pub const FLATTEN_ACTION: ActionId = ActionId(3);
+pub const OPTION_ACTION: ActionId = ActionId(4);
 
 #[derive(Debug)]
 pub enum SymbolKind {
@@ -69,15 +77,16 @@ pub struct NonterminalProduction {
     pub id: ProductionId,
     pub lhs_id: SymbolId,
     pub rhs: Vec<SymbolId>,
-    pub action: Option<String>,
+    pub action: ActionId,
 }
 
 #[derive(Debug)]
 pub struct InternedSymbols {
-    pub(crate) terminals: Vec<Symbol>,
-    pub(crate) nonterminals: Vec<Symbol>,
-    pub(crate) productions: Vec<Option<NonterminalProduction>>,
-    pub terminal_map: HashMap<String, SymbolId>,
+    pub terminals: Vec<Symbol>,
+    pub nonterminals: Vec<Symbol>,
+    pub productions: Vec<Option<NonterminalProduction>>,
+    actions: Vec<String>,
+    terminal_map: HashMap<String, SymbolId>,
     nonterminal_map: HashMap<String, SymbolId>,
 }
 
@@ -87,11 +96,23 @@ impl InternedSymbols {
             terminals: Vec::new(),
             nonterminals: Vec::new(),
             productions: Vec::new(),
+            actions: Vec::new(),
             terminal_map: HashMap::new(),
             nonterminal_map: HashMap::new(),
         };
         interned_symbols.add_terminal(EOF_ID, String::from("EOF"), None);
+        interned_symbols.add_intrincic_action(String::from("@default"), DEFAULT_ACTION);
+        interned_symbols.add_intrincic_action(String::from("@sequence"), SEQUENCE_ACTION);
+        interned_symbols.add_intrincic_action(String::from("@prepend"), PREPEND_ACTION);
+        interned_symbols.add_intrincic_action(String::from("@flatten"), FLATTEN_ACTION);
+        interned_symbols.add_intrincic_action(String::from("@option"), OPTION_ACTION);
         interned_symbols
+    }
+
+    fn add_intrincic_action(&mut self, action: String, id: ActionId) {
+        let cloned = action.clone();
+        self.add_action(action);
+        debug_assert_eq!(self.search_action(&cloned), Some(id));
     }
 
     pub fn iter_productions(&self) -> impl Iterator<Item = &NonterminalProduction> {
@@ -104,6 +125,12 @@ impl InternedSymbols {
 
     pub fn search_nonterminal(&self, name: &str) -> Option<&Symbol> {
         self.nonterminal_map.get(name).map(|&id| &self.nonterminals[self.nonterminal_index(id)])
+    }
+
+    pub fn search_action(&self, action: &str) -> Option<ActionId> {
+        self.actions.iter()
+            .position(|act| act == action)
+            .map(|pos| ActionId(pos as u16))
     }
 
     pub fn symbol(&self, id: SymbolId) -> &Symbol {
@@ -126,7 +153,7 @@ impl InternedSymbols {
     pub fn production(&self, id: ProductionId) -> &NonterminalProduction {
         self.productions[id.0 as usize].as_ref().unwrap()
     }
-
+ 
     pub fn add_terminal(&mut self, id: SymbolId, name: String, value: Option<String>) { 
         let key = value.clone().unwrap_or_else(|| name.clone());
 
@@ -141,6 +168,15 @@ impl InternedSymbols {
             id, name: name.clone(), kind: SymbolKind::Nonterminal { entrypoint, productions: Vec::new() }
         });
         self.nonterminal_map.insert(name, id);
+    }
+
+    pub fn add_action(&mut self, action: String) -> ActionId {
+        self.search_action(&action)
+            .unwrap_or_else(|| {
+                let index = self.actions.len();
+                self.actions.push(action);
+                ActionId(index as u16)
+            })
     }
 
     pub fn terminal_index(&self, id: SymbolId) -> usize {

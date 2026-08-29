@@ -1,26 +1,48 @@
-use crate::diagnostics::DiagnosticInfo;
-use crate::lr::CanonicalCollection;
-use crate::symbols::{InternedSymbols, Symbol, SymbolId, SymbolKind};
-use crate::table::{ParseTable, StateId};
+use crate::scanner::Scanner;
+use crate::parser::GrammarParser;
+use crate::lowering::LoweringContext;
+use crate::computation::ComputationEngine;
 
-pub struct TableGenerator<'a> {
-    interned_symbols: &'a InternedSymbols,
+use shred_core::diagnostics::DiagnosticInfo;
+use shred_core::lr::CanonicalCollection;
+use shred_core::symbols::{InternedSymbols, Symbol, SymbolId, SymbolKind};
+use shred_core::table::{ParseTable, StateId};
+
+pub struct TableGenerator {
+    interned_symbols: InternedSymbols,
     canonical_collection: CanonicalCollection,
 }
 
-impl<'a> TableGenerator<'a> {
-    pub fn new(interned_symbols: &'a InternedSymbols, canonical_collection: CanonicalCollection) -> Self {
+impl TableGenerator {
+    pub fn new(interned_symbols: InternedSymbols, canonical_collection: CanonicalCollection) -> Self {
         TableGenerator { interned_symbols, canonical_collection }
     }
 
-    pub fn generate_table(&mut self, diag_info: &mut DiagnosticInfo) -> ParseTable<'a> {
+    pub fn generate_from_grammar(source: &str) -> ParseTable {
+        let scanner = Scanner::new(source);
+        let parser = GrammarParser::new(scanner);
+        let arena = parser.parse_ast().unwrap();
+
+        let ctx = LoweringContext::new(arena);
+        let interned_symbols = ctx.lower_symbols().unwrap();
+
+        let mut diag_info = DiagnosticInfo::new();
+
+        let ctx = ComputationEngine::new(&interned_symbols);
+        let collection = ctx.compute_canonical_collection(&mut diag_info);
+
+        let generator = Self::new(interned_symbols, collection);
+        generator.generate_table(&mut diag_info)
+    }
+
+    pub fn generate_table(self, diag_info: &mut DiagnosticInfo) -> ParseTable {
         let mut table = ParseTable::new(
-            &self.interned_symbols,
+            self.interned_symbols,
             self.canonical_collection.context.kernels.len()
         );
 
         for ((from_state, symbol_id), to_state) in &self.canonical_collection.transitions {
-            match self.interned_symbols.symbol(*symbol_id) {
+            match table.interned_symbols.symbol(*symbol_id) {
                 Symbol { kind: SymbolKind::Terminal { .. }, .. } => {
                     table.add_shift(*from_state, *symbol_id, *to_state);
                 }
@@ -38,11 +60,13 @@ impl<'a> TableGenerator<'a> {
             let items = &self.canonical_collection.context.kernels[state_id.0 as usize];
             for item in items {
                 let (production_id, position) = self.canonical_collection.context.item_core(item.index);
-                let production = self.interned_symbols.production(production_id);
+                let production = table.interned_symbols.production(production_id);
 
                 if production.rhs.len() <= position as usize {
-                    let lhs = self.interned_symbols.nonterminal(production.lhs_id);
-                    if let Symbol { kind: SymbolKind::Nonterminal { entrypoint: true, .. }, .. } = lhs {
+                    let lhs_id = production.lhs_id;
+                    if let Symbol { kind: SymbolKind::Nonterminal { entrypoint: true, .. }, .. } =
+                        table.interned_symbols.nonterminal(lhs_id)
+                    {
                         table.add_accept(state_id, production_id);
                     }
                     else {
@@ -56,7 +80,7 @@ impl<'a> TableGenerator<'a> {
                         if !had_any_lookahead {
                             panic!(
                                 "Found no lookahead for necessary reduction of {} in state # {}",
-                                lhs.name,
+                                table.interned_symbols.nonterminal(lhs_id).name,
                                 state_id.0,
                             )
                         }
@@ -68,7 +92,8 @@ impl<'a> TableGenerator<'a> {
         for (state_id, item) in &self.canonical_collection.epsilon_transitions {
             let (production_id, position) = self.canonical_collection.context.item_core(item.index);
 
-            let production = self.interned_symbols.production(production_id);
+            let production = table.interned_symbols.production(production_id);
+            let lhs_id = production.lhs_id;
             assert!(position == 0 && production.rhs.len() == 0);
 
             let mut had_any_lookahead = false;
@@ -79,7 +104,7 @@ impl<'a> TableGenerator<'a> {
             }
 
             if !had_any_lookahead {
-                let lhs = self.interned_symbols.symbol(production.lhs_id);
+                let lhs = table.interned_symbols.symbol(lhs_id);
                 panic!(
                     "Found no lookahead for necessary reduction of {} in state # {}",
                     lhs.name,

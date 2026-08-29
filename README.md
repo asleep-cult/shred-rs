@@ -25,7 +25,7 @@ There are a few important questions that need to be answered:
 
 Notes on progress:
 - [X] `ast.py` -> `ast.rs`: Definitions for meta-grammar AST
-- [ ] `automaton.py`: Pushdown automaton for parsing with generated parse table
+- [X] `automaton.py`: Pushdown automaton for parsing with generated parse table
 - [X] `frozen.py` (Symbol table) -> `symbols.rs`: Serializable versions of the symbol/parse table which the automaton uses
 - [X] `frozen.py` (Parse table) -> `table.rs`: Parse table structure and implementation
 - [X] `generator.py`: Convert the AST into a high-level representation and generate the parse table
