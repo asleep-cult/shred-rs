@@ -9,6 +9,7 @@ name = "python_bindings"
 crate-type = ["cdylib"]
 
 [dependencies]
+shred-core = { path = "../shred-core" }
 shred-automaton = { path = "../shred-automaton" }
 shred-generator = { path = "../shred-generator" }
 pyo3 = "0.29.0"

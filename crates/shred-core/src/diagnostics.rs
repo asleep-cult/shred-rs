@@ -26,13 +26,12 @@ impl DiagnosticInfo {
     }
 
     fn write_closure(
-        &mut self,
+        writer: &mut Box<dyn io::Write>,
         interned_symbols: &InternedSymbols,
         context: &LRContext,
         state_id: StateId,
         items: &[Lr1Item],
     ) -> io::Result<()> {
-        let Some(ref mut writer) = self.closure_writer else { return Ok(()) };
         write!(writer, "<parser closure dump #{}>\n", state_id.0)?;
 
         for (i, item) in items.iter().enumerate() {
@@ -70,14 +69,14 @@ impl DiagnosticInfo {
         state_id: StateId,
         items: &[Lr1Item],
     ) {
-        let result = self.write_closure(interned_symbols, context, state_id, items);
+        let Some(writer) = &mut self.closure_writer else { return };
+        let result = DiagnosticInfo::write_closure(writer, interned_symbols, context, state_id, items);
         if let Err(err) = result {
             println!("An error occured while trying to write a closure to the writer: {}", err.to_string());
         }
     }
 
-    fn write_table(&mut self, table: &ParseTable) -> io::Result<()> {
-        let Some(ref mut writer) = self.table_writer else { return Ok(()) };
+    fn write_table(writer: &mut Box<dyn io::Write>, table: &ParseTable) -> io::Result<()> {
         for idx in 0..table.number_of_states {
             let state_id = StateId(idx as u16);
             write!(writer, "<state #{}>", idx)?;
@@ -117,7 +116,8 @@ impl DiagnosticInfo {
     }
 
     pub fn dump_table(&mut self, table: &ParseTable) {
-        let result = self.write_table(table);
+        let Some(writer) = &mut self.closure_writer else { return };
+        let result = DiagnosticInfo::write_table(writer, table);
         if let Err(err) = result {
             println!("An error occured while trying to write a table to the writer: {}", err.to_string());
         }

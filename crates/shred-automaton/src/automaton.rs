@@ -5,10 +5,10 @@ use shred_core::bitset::Bitset;
 use shred_core::symbols::{DEFAULT_ACTION, EOF_ID, FLATTEN_ACTION, OPTION_ACTION, PREPEND_ACTION, SEQUENCE_ACTION, SymbolId};
 use shred_core::table::{ActionKind, ParseTable, StateId};
 
-type Span = (usize, usize);
+pub type Span = (usize, usize);
 
-type Item<T> = <T as ItemInitializer>::Item;
-type Sequence<T> = <T as ItemInitializer>::Sequence;
+pub type Item<T> = <T as ItemInitializer>::Item;
+pub type Sequence<T> = <T as ItemInitializer>::Sequence;
 
 #[derive(Debug)]
 pub enum AutomatonErrorKind<T: ItemInitializer> {
@@ -16,11 +16,12 @@ pub enum AutomatonErrorKind<T: ItemInitializer> {
     UnexpectedToken { item: T::Item, state_id: StateId }
 }
 
+
 // The following traits are meant to make the automaton very extensible. It should be usable
 // with arbitrary heap allocated nodes (for Python objects!) and an interner (which the default uses). 
-pub trait ItemInitializer: fmt::Debug {
-    type Item: ItemType;
-    type Sequence: SequenceType;
+pub trait ItemInitializer {
+    type Item: ItemType<Init = Self>;
+    type Sequence: SequenceType<Init = Self>;
 
     fn create_item(&mut self, span: Span, symbol_id: SymbolId) -> Self::Item;
     fn create_item_from_option(
@@ -38,7 +39,7 @@ pub trait ItemInitializer: fmt::Debug {
 }
 
 pub trait ItemType: Default + fmt::Debug + Clone {
-    type Init: ItemInitializer;
+    type Init: ItemInitializer<Item = Self>;
 
     fn start(&self, initializer: &Self::Init) -> usize;
     fn end(&self, initializer: &Self::Init) -> usize;
@@ -46,7 +47,9 @@ pub trait ItemType: Default + fmt::Debug + Clone {
     fn updrage_to_sequence(self, initializer: &Self::Init) -> Result<Sequence<Self::Init>, Item<Self::Init>>;
 }
 
-pub trait SequenceType: ItemType {
+pub trait SequenceType {
+    type Init: ItemInitializer<Sequence = Self>;
+
     fn insert(&mut self, initializer: &mut Self::Init, index: usize, value: Item<Self::Init>);
     fn append(&mut self, initializer: &mut Self::Init, items: &mut Vec<Item<Self::Init>>);
     fn push(&mut self, initializer: &mut Self::Init, value: Item<Self::Init>);
@@ -71,11 +74,10 @@ impl<'a, U: Copy> ItemVecIterator<Copied<std::slice::Iter<'a, U>>, U> {
 }
 
 
-impl<T, U, V> ItemIterator<T> for ItemVecIterator<U, V>
+impl<T, U> ItemIterator<T> for ItemVecIterator<U, Item<T>>
 where
-    T: ItemInitializer<Item = V>,
-    U: Iterator<Item = V>,
-    V: ItemType<Init = T>,
+    T: ItemInitializer,
+    U: Iterator<Item = Item<T>>,
 {
     fn current(&mut self) -> T::Item {
         if let Some(current) = self.last_seen.clone() {
@@ -194,6 +196,8 @@ impl ItemType for DefaultItem {
 }
 
 impl SequenceType for DefaultItem {
+    type Init = DefaultInitializer;
+
     fn insert(
         &mut self,
         initializer: &mut DefaultInitializer,
@@ -238,12 +242,10 @@ pub struct ParserAutomaton<'table, 'transformer, T: ItemInitializer, U> {
     state_stack: Vec<StateId>,
 }
 
-impl<'table, 'transformer, T, U, V, W> ParserAutomaton<'table, 'transformer, T, U>
+impl<'table, 'transformer, T, U> ParserAutomaton<'table, 'transformer, T, U>
     where
-        T: ItemInitializer<Item = V, Sequence = W> + 'transformer,
+        T: ItemInitializer + 'transformer,
         U: ItemIterator<T> + 'transformer,
-        V: ItemType<Init = T> + 'transformer,
-        W: SequenceType<Init = T> + 'transformer,
 {
     pub fn new(
         table: &'table ParseTable,
@@ -348,7 +350,8 @@ impl<'table, 'transformer, T, U, V, W> ParserAutomaton<'table, 'transformer, T, 
                     let span = if production.rhs.len() > 0 {
                         let end = self.item_stack.iter().rev().find(|item| {
                             let symbol = self.table.interned_symbols.symbol(item.symbol_id(&self.item_initializer));
-                                symbol.is_nonterminal() || !self.ignored_ends.has(self.table.interned_symbols.terminal_index(symbol.id))
+                                symbol.is_nonterminal()
+                                || !self.ignored_ends.has(self.table.interned_symbols.terminal_index(symbol.id))
                             })
                             .map(|item| item.end(&self.item_initializer));
 

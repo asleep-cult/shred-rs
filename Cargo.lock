@@ -98,6 +98,7 @@ version = "0.1.0"
 dependencies = [
  "pyo3",
  "shred-automaton",
+ "shred-core",
  "shred-generator",
 ]
 
