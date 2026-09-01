@@ -6,3 +6,7 @@ expected.txt
 gram
 .env
 .github
+python_bindings.pyd
+test.py
+test.tpy
+tpy_syntax

@@ -4,8 +4,8 @@ use pyo3::types;
 use shred_core::bitset::Bitset;
 
 #[pyclass]
-struct PyBitset {
-    bitset: Bitset<Vec<u64>>,
+pub struct PyBitset {
+    pub(crate) bitset: Bitset<Vec<u64>>,
 }
 
 #[pymethods]
@@ -21,7 +21,7 @@ impl PyBitset {
 
         let py = number.py();
         let kwargs = types::PyDict::new(py);
-        kwargs.set_item("byteorder", "little");
+        kwargs.set_item("byteorder", "little")?;
 
         let bytes: Vec<u8> = number.call_method("to_bytes", (nbytes,), Some(&kwargs))?
             .extract()?;

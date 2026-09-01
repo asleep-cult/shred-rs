@@ -19,6 +19,8 @@ pub const PREPEND_ACTION: ActionId = ActionId(2);
 pub const FLATTEN_ACTION: ActionId = ActionId(3);
 pub const OPTION_ACTION: ActionId = ActionId(4);
 
+pub const INTRINSIC_BOUNDARY: u16 = OPTION_ACTION.0;
+
 #[derive(Debug)]
 pub enum SymbolKind {
     Nonterminal { entrypoint: bool, productions: Vec<ProductionId> },
@@ -85,7 +87,7 @@ pub struct InternedSymbols {
     pub terminals: Vec<Symbol>,
     pub nonterminals: Vec<Symbol>,
     pub productions: Vec<Option<NonterminalProduction>>,
-    actions: Vec<String>,
+    pub actions: Vec<String>,
     terminal_map: HashMap<String, SymbolId>,
     nonterminal_map: HashMap<String, SymbolId>,
 }

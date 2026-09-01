@@ -7,12 +7,12 @@ use pyo3::prelude::*;
 /// A Python module implemented in Rust.
 #[pymodule]
 mod python_bindings {
-    use super::*;
+    #[pymodule_export]
+    use super::automaton::{UnexpectedTokenError, BaseItem, SequenceItem, OptionItem, PyParserAutomaton};
 
-    /// Formats the sum of two numbers as string.
-    #[pyfunction]
-    fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-        bitset::
-        Ok((a + b).to_string())
-    }
+    #[pymodule_export]
+    use super::bitset::{PyBitset};
+
+    #[pymodule_export]
+    use super::table::{PyParseTable};
 }

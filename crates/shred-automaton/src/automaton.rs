@@ -6,60 +6,75 @@ use shred_core::symbols::{DEFAULT_ACTION, EOF_ID, FLATTEN_ACTION, OPTION_ACTION,
 use shred_core::table::{ActionKind, ParseTable, StateId};
 
 pub type Span = (usize, usize);
+pub type TransformFn<'t, T> = Box<dyn Fn(
+    &mut T,
+    Span,
+    SymbolId,
+    Vec<<T as ItemInitializer>::Item>,
+) -> InitializerResult<<T as ItemInitializer>::Item, T> + 't>;
 
-pub type Item<T> = <T as ItemInitializer>::Item;
-pub type Sequence<T> = <T as ItemInitializer>::Sequence;
+pub type InitializerResult<T, U> = Result<T, <U as ItemInitializer>::Error>;
+pub type AutomatonResult<T, U> = Result<T, AutomatonErrorKind<U>>;
 
 #[derive(Debug)]
 pub enum AutomatonErrorKind<T: ItemInitializer> {
     StackUnderflow,
-    UnexpectedToken { item: T::Item, state_id: StateId }
+    UnexpectedToken { item: T::Item, state_id: StateId },
+    InitializerError(T::Error),
 }
-
 
 // The following traits are meant to make the automaton very extensible. It should be usable
 // with arbitrary heap allocated nodes (for Python objects!) and an interner (which the default uses). 
 pub trait ItemInitializer {
     type Item: ItemType<Init = Self>;
-    type Sequence: SequenceType<Init = Self>;
+    type Error;
 
-    fn create_item(&mut self, span: Span, symbol_id: SymbolId) -> Self::Item;
+    fn create_item(&mut self, span: Span, symbol_id: SymbolId) -> InitializerResult<Self::Item, Self>;
     fn create_item_from_option(
         &mut self,
         span: Span,
         symbol_id: SymbolId,
         item: Option<Self::Item>,
-    ) -> Self::Item;
+    ) -> InitializerResult<Self::Item, Self>;
     fn create_sequence_from_vec(
         &mut self,
         span: Span,
         symbol_id: SymbolId,
         items: Vec<Self::Item>,
-    ) -> Self::Sequence;
+    ) -> InitializerResult<Self::Item, Self>;
 }
 
-pub trait ItemType: Default + fmt::Debug + Clone {
+pub trait ItemType: fmt::Debug {
     type Init: ItemInitializer<Item = Self>;
 
     fn start(&self, initializer: &Self::Init) -> usize;
     fn end(&self, initializer: &Self::Init) -> usize;
     fn symbol_id(&self, initializer: &Self::Init) -> SymbolId;
-    fn updrage_to_sequence(self, initializer: &Self::Init) -> Result<Sequence<Self::Init>, Item<Self::Init>>;
-}
 
-pub trait SequenceType {
-    type Init: ItemInitializer<Sequence = Self>;
+    fn is_sequence(&self, initializer: &Self::Init) -> bool;
 
-    fn insert(&mut self, initializer: &mut Self::Init, index: usize, value: Item<Self::Init>);
-    fn append(&mut self, initializer: &mut Self::Init, items: &mut Vec<Item<Self::Init>>);
-    fn push(&mut self, initializer: &mut Self::Init, value: Item<Self::Init>);
-    fn to_owned_vec(self, initializer: &mut Self::Init) -> Vec<Item<Self::Init>>;
-    fn downgrade_to_item(self, initializer: &Self::Init) -> Item<Self::Init>;
+    fn insert(
+        &mut self,
+        initializer: &mut Self::Init,
+        index: usize,
+        value: <Self::Init as ItemInitializer>::Item,
+    ) -> InitializerResult<(), Self::Init>;
+    fn append(
+        &mut self,
+        initializer: &mut Self::Init,
+        item: <Self::Init as ItemInitializer>::Item,
+    ) -> InitializerResult<(), Self::Init>;
+    fn push(
+        &mut self,
+        initializer: &mut Self::Init,
+        value: <Self::Init as ItemInitializer>::Item,
+    ) -> InitializerResult<(), Self::Init>;
+
 }
 
 pub trait ItemIterator<T: ItemInitializer> {
-    fn current(&mut self) -> T::Item;
-    fn advance(&mut self);
+    fn current(&mut self, initializer: &T) -> InitializerResult<T::Item, T>;
+    fn advance(&mut self, initializer: &T) -> InitializerResult<(), T>;
 }
 
 pub struct ItemVecIterator<T, U> {
@@ -74,32 +89,34 @@ impl<'a, U: Copy> ItemVecIterator<Copied<std::slice::Iter<'a, U>>, U> {
 }
 
 
-impl<T, U> ItemIterator<T> for ItemVecIterator<U, Item<T>>
+impl<T, U, V> ItemIterator<T> for ItemVecIterator<U, V>
 where
-    T: ItemInitializer,
-    U: Iterator<Item = Item<T>>,
+    T: ItemInitializer<Item = V>,
+    U: Iterator<Item = T::Item>,
+    V: Clone,
 {
-    fn current(&mut self) -> T::Item {
+    fn current(&mut self, _initializer: &T) -> InitializerResult<T::Item, T> {
         if let Some(current) = self.last_seen.clone() {
-            return current;
+            return Ok(current);
         }
         if let Some(next) = self.iterator.next() {
             self.last_seen = Some(next);
         }
-        self.last_seen.clone().unwrap()
+        Ok(self.last_seen.clone().unwrap())
     }
 
-    fn advance(&mut self) {
+    fn advance(&mut self, _initializer: &T) -> InitializerResult<(), T> {
         if let Some(next) = self.iterator.next() {
             self.last_seen = Some(next);
         }
+        Ok(())
     }
 }
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct DefaultItem(pub usize);
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub enum DefaultItemKind {
     Item,   // XXX: The default item representation has no way of holding very basic things... for example, the content
             // of an identifier token. This was kind of the point but it has the unfortunate side effect of making the
@@ -117,11 +134,9 @@ pub enum DefaultItemKind {
             //      "def" <name:IDENTIFIER> "(" <parameters:function_parameters> ")" "->" <returns:path_expression> => FunctionDefNode
     Sequence(Vec<DefaultItem>),
     Option(Option<DefaultItem>),
-    #[default]
-    Taken,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct DefaultItemData {
     span: Span,
     symbol_id: SymbolId,
@@ -139,36 +154,41 @@ impl DefaultInitializer {
     }
 }
 
+#[derive(Debug)]
+pub enum DefaultErrorKind {
+    NotASequence,
+}
+
 impl ItemInitializer for DefaultInitializer {
     type Item = DefaultItem;
-    type Sequence = DefaultItem;
+    type Error = DefaultErrorKind;
 
-    fn create_item(&mut self, span: Span, symbol_id: SymbolId) -> Self::Item {
+    fn create_item(&mut self, span: Span, symbol_id: SymbolId) -> InitializerResult<DefaultItem, Self> {
         let idx = self.items.len();
         self.items.push(DefaultItemData { span, symbol_id, kind: DefaultItemKind::Item });
-        DefaultItem(idx)
+        Ok(DefaultItem(idx))
     }
 
     fn create_item_from_option(
         &mut self,
         span: Span,
         symbol_id: SymbolId,
-        item: Option<Self::Item>
-    ) -> Self::Item {
+        item: Option<DefaultItem>
+    ) -> InitializerResult<DefaultItem, Self> {
         let idx = self.items.len();
         self.items.push(DefaultItemData { span, symbol_id, kind: DefaultItemKind::Option(item) });
-        DefaultItem(idx)
+        Ok(DefaultItem(idx))
     }
 
     fn create_sequence_from_vec(
         &mut self,
         span: Span,
         symbol_id: SymbolId,
-        items: Vec<Self::Item>,
-    ) -> Self::Sequence {
+        items: Vec<DefaultItem>,
+    ) -> InitializerResult<DefaultItem, Self> {
         let idx = self.items.len();
         self.items.push(DefaultItemData { span, symbol_id, kind: DefaultItemKind::Sequence(items) });
-        DefaultItem(idx)
+        Ok(DefaultItem(idx))
     }
 }
 
@@ -187,57 +207,67 @@ impl ItemType for DefaultItem {
         initializer.items[self.0].symbol_id
     }
 
-    fn updrage_to_sequence(self, initializer: &DefaultInitializer) -> Result<DefaultItem, DefaultItem> {
-        match initializer.items[self.0].kind {
-            DefaultItemKind::Sequence(..) => Ok(self),
-            _ => Err(self)
-        }
+    fn is_sequence(&self, initializer: &Self::Init) -> bool {
+        matches!(&initializer.items[self.0], DefaultItemData { kind: DefaultItemKind::Sequence(_), .. })
     }
-}
-
-impl SequenceType for DefaultItem {
-    type Init = DefaultInitializer;
 
     fn insert(
         &mut self,
         initializer: &mut DefaultInitializer,
         index: usize,
         value: DefaultItem,
-    ) {
-        let DefaultItemData { kind: DefaultItemKind::Sequence(items), .. } =
-            &mut initializer.items[self.0] else { panic!("insert on non-sequence item") };
-        items.insert(index, value);
+    ) -> InitializerResult<(), DefaultInitializer> {
+        match &mut initializer.items[self.0] {
+            DefaultItemData { kind: DefaultItemKind::Sequence(items), .. } => {
+                items.insert(index, value);
+                Ok(())
+            }
+            _ => Err(DefaultErrorKind::NotASequence)
+        }
     }
 
-    fn append(&mut self, initializer: &mut DefaultInitializer, items: &mut Vec<DefaultItem>) {
+    fn append(
+        &mut self,
+        initializer: &mut DefaultInitializer,
+        item: DefaultItem,
+    ) -> InitializerResult<(), DefaultInitializer> {
+        let mut items = match &mut initializer.items[item.0] {
+            DefaultItemData { kind: DefaultItemKind::Sequence(items), .. } => {
+                std::mem::take(items)
+            }
+            _ => {
+                return Err(DefaultErrorKind::NotASequence)
+            }
+        };
+
         let DefaultItemData { kind: DefaultItemKind::Sequence(these_items), .. } =
-            &mut initializer.items[self.0] else { panic!("appen on non-sequence item") };
-        these_items.append(items);    
+            &mut initializer.items[self.0] else { return Err(DefaultErrorKind::NotASequence) };
+
+        these_items.append(&mut items);
+        Ok(())
     }
 
-    fn push(&mut self, initializer: &mut DefaultInitializer, value: DefaultItem) {
-        let DefaultItemData { kind: DefaultItemKind::Sequence(items), .. } =
-            &mut initializer.items[self.0] else { panic!("push on non-sequence item") };
-        items.push(value);
-    }
-
-    fn to_owned_vec(self, initializer: &mut DefaultInitializer) -> Vec<DefaultItem> {
-        let DefaultItemData { kind: DefaultItemKind::Sequence(items), .. } =
-            std::mem::take(&mut initializer.items[self.0]) else { panic!("to_owned_vec on non-sequence item") };
-        items
-    }
-
-    fn downgrade_to_item(self, _initializer: &DefaultInitializer) -> DefaultItem {
-        self
+    fn push(
+        &mut self,
+        initializer: &mut DefaultInitializer,
+        value: DefaultItem,
+    ) -> InitializerResult<(), DefaultInitializer> {
+        match &mut initializer.items[self.0] {
+            DefaultItemData { kind: DefaultItemKind::Sequence(items), .. } => {
+                items.push(value);
+                Ok(())
+            }
+            _ => Err(DefaultErrorKind::NotASequence)
+        }
     }
 }
 
 pub struct ParserAutomaton<'table, 'transformer, T: ItemInitializer, U> {
     table: &'table ParseTable,
     ignored_ends: Bitset<Vec<u64>>,  // Terminal symbol ids to ignore when finding span end of a stack item
-    item_initializer: T,
+    pub item_initializer: T,
     item_iterator: U,
-    transformers: Vec<Box<dyn Fn(&mut T, Span, SymbolId, Vec<T::Item>) -> T::Item + 'transformer>>,
+    transformers: Vec<TransformFn<'transformer, T>>,
     item_stack: Vec<T::Item>,
     state_stack: Vec<StateId>,
 }
@@ -252,76 +282,102 @@ impl<'table, 'transformer, T, U> ParserAutomaton<'table, 'transformer, T, U>
         ignored_ends: Bitset<Vec<u64>>,
         mut item_initializer: T,
         item_iterator: U,
-        mut transformers: Vec<Box<dyn Fn(&mut T, Span, SymbolId, Vec<T::Item>) -> T::Item + 'transformer>>,
+        mut transformers: Vec<TransformFn<'transformer, T>>,
         entry_state: StateId,
-    ) -> Self {
+    ) -> AutomatonResult<Self, T> {
         transformers.insert(DEFAULT_ACTION.0 as usize, Box::new(Self::default_action));
         transformers.insert(SEQUENCE_ACTION.0 as usize, Box::new(Self::sequence_action));
         transformers.insert(PREPEND_ACTION.0 as usize, Box::new(Self::prepend_action));
         transformers.insert(FLATTEN_ACTION.0 as usize, Box::new(Self::flatten_action));
         transformers.insert(OPTION_ACTION.0 as usize, Box::new(Self::option_action));
 
-        ParserAutomaton {
+        Ok(ParserAutomaton {
             table,
             ignored_ends,
             item_iterator,
             transformers,
-            item_stack: vec![item_initializer.create_item((0, 0), EOF_ID)],
+            item_stack: vec![
+                item_initializer.create_item((0, 0), EOF_ID)
+                    .map_err(|err| AutomatonErrorKind::InitializerError(err))?
+                ],
             state_stack: vec![entry_state],
             item_initializer,
-        }
+        })
     }
 
-    fn default_action(initializer: &mut T, span: Span, symbol_id: SymbolId, mut items: Vec<T::Item>) -> T::Item {
+    fn default_action(
+        initializer: &mut T,
+        span: Span,
+        symbol_id: SymbolId,
+        mut items: Vec<T::Item>,
+    ) -> InitializerResult<T::Item, T> {
         if items.len() == 1 {
-            items.remove(0)
+            Ok(items.remove(0))
         }
         else {
-            initializer.create_sequence_from_vec(span, symbol_id, items).downgrade_to_item(initializer)
+            initializer.create_sequence_from_vec(span, symbol_id, items)
         }
     }
 
-    fn sequence_action(initializer: &mut T, span: Span, symbol_id: SymbolId, items: Vec<T::Item>) -> T::Item {
-        initializer.create_sequence_from_vec(span, symbol_id, items).downgrade_to_item(initializer)
+    fn sequence_action(
+        initializer: &mut T,
+        span: Span,
+        symbol_id: SymbolId,
+        items: Vec<T::Item>,
+    ) -> InitializerResult<T::Item, T> {
+        initializer.create_sequence_from_vec(span, symbol_id, items)
     }
 
-    fn prepend_action(initializer: &mut T, _span: Span, _symbol_id: SymbolId, mut items: Vec<T::Item>) -> T::Item {
+    fn prepend_action(
+        initializer: &mut T,
+        _span: Span,
+        _symbol_id: SymbolId,
+        mut items: Vec<T::Item>,
+    ) -> InitializerResult<T::Item, T> {
         if items.len() != 2 {
             panic!("Prepend must be called on two items, found {}", items.len());
         }
 
         let first_item = items.remove(0);
-        let second_item = items.remove(0);
-        match second_item.updrage_to_sequence(initializer) {
-            Ok(mut item) => {
-                item.insert(initializer, 0, first_item);
-                return item.downgrade_to_item(initializer);
-            }
-            _ => {
-                panic!("The second item of the prepend intrinsic must be a sequence");
-            }
-        }
+        let mut second_item = items.remove(0);
+        second_item.insert(initializer, 0, first_item)?;
+        Ok(second_item)
     }
 
-    fn flatten_action(initializer: &mut T, span: Span, symbol_id: SymbolId, items: Vec<T::Item>) -> T::Item {
-        let mut result: Vec<T::Item> = Vec::new();
-        for item in items {
-            match item.updrage_to_sequence(initializer) {
-                Ok(item) => {
-                    result.append(&mut item.to_owned_vec(initializer));
-                }
-                Err(item) => result.push(item),
+    fn flatten_action(
+        initializer: &mut T,
+        span: Span,
+        symbol_id: SymbolId,
+        items: Vec<T::Item>,
+    ) -> InitializerResult<T::Item, T> {
+        let mut item = initializer.create_sequence_from_vec(
+            span,
+            symbol_id,
+            Vec::new(),
+        )?;
+
+        for inner_item in items {
+            if inner_item.is_sequence(initializer) {
+                item.append(initializer, inner_item)?;
+            }
+            else {
+                item.push(initializer, inner_item)?;
             }
         }
-        initializer.create_sequence_from_vec(span, symbol_id, result).downgrade_to_item(initializer)
+        Ok(item)
     }
 
-    fn option_action(initializer: &mut T, span: Span, symbol_id: SymbolId, mut items: Vec<T::Item>) -> T::Item {
+    fn option_action(
+        initializer: &mut T,
+        span: Span,
+        symbol_id: SymbolId,
+        mut items: Vec<T::Item>,
+    ) -> InitializerResult<T::Item, T> {
         if items.len() == 0 {
             initializer.create_item_from_option(span, symbol_id, None)
         }
         else {
-            assert_eq!(items.len(), 2, "The option intrinsic can only take two items from the stack");
+            assert_eq!(items.len(), 1, "The option intrinsic can only take one item from the stack");
             initializer.create_item_from_option(span, symbol_id, Some(items.remove(0)))
         }
     }
@@ -332,24 +388,28 @@ impl<'table, 'transformer, T, U> ParserAutomaton<'table, 'transformer, T, U>
                 return Err(AutomatonErrorKind::StackUnderflow);
             }
             let current_state = self.state_stack[self.state_stack.len() - 1];
-            let current_item = self.item_iterator.current();
-            match self.table.action(current_state, current_item.symbol_id(&self.item_initializer)) {
+            let current_item = self.item_iterator.current(&self.item_initializer)
+                .map_err(|err| AutomatonErrorKind::InitializerError(err))?;
+
+            let symbol_id = current_item.symbol_id(&self.item_initializer);
+            match self.table.action(current_state, symbol_id) {
                 ActionKind::Reject => {
                     return Err(AutomatonErrorKind::UnexpectedToken { item: current_item, state_id: current_state });
                 }
                 ActionKind::Shift(next_state_id) => {
-                    self.item_iterator.advance();
+                    self.item_iterator.advance(&self.item_initializer)
+                        .map_err(|err| AutomatonErrorKind::InitializerError(err))?;
                     self.item_stack.push(current_item);
                     self.state_stack.push(next_state_id);
                 }
                 ActionKind::Reduce(production_id) => {
                     let production = self.table.interned_symbols.production(production_id);
-
                     let mut items: Vec<T::Item> = Vec::with_capacity(production.rhs.len());
 
                     let span = if production.rhs.len() > 0 {
                         let end = self.item_stack.iter().rev().find(|item| {
-                            let symbol = self.table.interned_symbols.symbol(item.symbol_id(&self.item_initializer));
+                                let symbol_id = item.symbol_id(&self.item_initializer);
+                                let symbol = self.table.interned_symbols.symbol(symbol_id);
                                 symbol.is_nonterminal()
                                 || !self.ignored_ends.has(self.table.interned_symbols.terminal_index(symbol.id))
                             })
@@ -367,7 +427,8 @@ impl<'table, 'transformer, T, U> ParserAutomaton<'table, 'transformer, T, U>
                         }
 
                         let item = &self.item_stack[self.item_stack.len() - 1];
-                        (item.end(&self.item_initializer), item.end(&self.item_initializer))
+                        let end = item.end(&self.item_initializer);
+                        (end, end)
                     };
 
                     let transformer = &self.transformers[production.action.0 as usize];
@@ -376,7 +437,7 @@ impl<'table, 'transformer, T, U> ParserAutomaton<'table, 'transformer, T, U>
                         span,
                         production.lhs_id,
                         items,
-                    );
+                    ).map_err(|err| AutomatonErrorKind::InitializerError(err))?;
                     self.item_stack.push(item);
 
                     if self.state_stack.len() == 0 {
@@ -410,7 +471,7 @@ impl<'table, 'transformer, T, U> ParserAutomaton<'table, 'transformer, T, U>
                         span,
                         production.lhs_id,
                         items,
-                    );
+                    ).map_err(|err| AutomatonErrorKind::InitializerError(err))?;
                     return Ok(item);
                 }
             }
